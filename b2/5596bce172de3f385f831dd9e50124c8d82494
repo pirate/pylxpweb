@@ -1,0 +1,119 @@
+_env.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-29
+addon-solar_dashboard/src/pylxpweb/__init__.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-83
+addon-solar_dashboard/src/pylxpweb/endpoints/__init__.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-27
+addon-solar_dashboard/src/pylxpweb/endpoints/forecasting.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-109
+addon-solar_dashboard/src/pylxpweb/endpoints/plants.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-466
+addon-solar_dashboard/src/pylxpweb/devices/base.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-122
+addon-solar_dashboard/src/pylxpweb/client.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-701
+addon-solar_dashboard/src/pylxpweb/devices/station.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-890
+addon-solar_dashboard/src/pylxpweb/devices/battery.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-589
+addon-solar_dashboard/src/pylxpweb/constants/__init__.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-465
+apply_priority_fix.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-85
+addon-solar_dashboard/src/pylxpweb/endpoints/devices.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-397
+addon-solar_dashboard/src/pylxpweb/devices/__init__.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-32
+addon-solar_dashboard/src/pylxpweb/endpoints/control.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-1123
+addon-solar_dashboard/src/pylxpweb/endpoints/analytics.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-446
+apply_tou_window.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-133
+addon-solar_dashboard/src/pylxpweb/registers.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-511
+addon-solar_dashboard/src/pylxpweb/endpoints/firmware.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-268
+addon-solar_dashboard/src/pylxpweb/devices/inverters/__init__.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-7
+fix_battery_limits.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-171
+addon-solar_dashboard/src/pylxpweb/endpoints/base.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-43
+addon-solar_dashboard/src/pylxpweb/constants/registers.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-965
+addon-solar_dashboard/src/pylxpweb/endpoints/export.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-86
+addon-solar_dashboard/src/pylxpweb/api_namespace.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-241
+addon-solar_dashboard/Dockerfile
+  s_5a300c8feab054::t_01d076dc2b9019 1-18
+addon-solar_dashboard/src/pylxpweb/devices/inverters/generic.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-192
+addon-solar_dashboard/src/pylxpweb/devices/parallel_group.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-351
+addon-solar_dashboard/src/pylxpweb/devices/_firmware_update_mixin.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-504
+addon-solar_dashboard/src/pylxpweb/devices/models.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-126
+addon-solar_dashboard/src/pylxpweb/devices/_mid_runtime_properties.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-545
+addon-solar_dashboard/src/pylxpweb/constants/api.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-43
+run.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-1113
+analyze_imports.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-264
+addon-solar_dashboard/src/pylxpweb/devices/inverters/hybrid.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-274
+addon-solar_dashboard/src/pylxpweb/cli/__init__.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-3
+check_settings.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-121
+addon-solar_dashboard/src/pylxpweb/exceptions.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-27
+addon-solar_dashboard/src/pylxpweb/cli/collect_device_data.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-874
+addon-solar_dashboard/src/pylxpweb/models.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-1289
+addon-solar_dashboard/src/pylxpweb/constants/locations.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-227
+analyze_trickle_days.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-287
+apply_voltage_fix.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-73
+solar_dashboard.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-2808
+addon-solar_dashboard/src/pylxpweb/devices/inverters/_runtime_properties.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-596
+addon-solar_dashboard/src/pylxpweb/constants/devices.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-98
+addon-solar_dashboard/src/pylxpweb/devices/mid_device.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-183
+addon-solar_dashboard/solar_dashboard.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-2808
+addon-solar_dashboard/src/pylxpweb/constants/scaling.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-479
+addon-solar_dashboard/src/pylxpweb/devices/inverters/base.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-1473
+addon-solar_dashboard/config.yaml
+  s_5a300c8feab054::t_01d076dc2b9019 1-33
+addon-solar_dashboard/src/pylxpweb/devices/battery_bank.py
+  s_5a300c8feab054::t_01d076dc2b9019 1-331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "b25596bce172de3f385f831dd9e50124c8d82494",
+  "prompts": {},
+  "sessions": {
+    "s_5a300c8feab054": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb927930-58d5-41d1-8103-42fcc934a2f7",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Nick Sweeting <git@sweeting.me>"
+    }
+  }
+}
