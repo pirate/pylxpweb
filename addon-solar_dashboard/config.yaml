@@ -1,0 +1,33 @@
+name: Solar Dashboard
+version: "1.1.1"
+slug: solar_dashboard
+description: 3D solar/battery/grid live dashboard for EG4/Luxpower (read-only)
+url: https://github.com/joyfulhouse/pylxpweb
+arch:
+  - aarch64
+init: false
+startup: services
+boot: auto
+ports:
+  5050/tcp: 5050
+ports_description:
+  5050/tcp: Web UI (LAN/Tailnet only — not WAN exposed unless you port-forward)
+host_network: false
+host_pid: false
+hassio_api: false
+homeassistant_api: false
+auth_api: false
+ingress: false
+panel_icon: mdi:solar-power-variant
+options:
+  eg4_username: ""
+  eg4_password: ""
+  eg4_base_url: "https://monitor.eg4electronics.com"
+  latitude: 37.8044
+  longitude: -122.2712
+schema:
+  eg4_username: str
+  eg4_password: password
+  eg4_base_url: url
+  latitude: float
+  longitude: float
