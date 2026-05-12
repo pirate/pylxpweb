@@ -158,8 +158,8 @@ class PlantBasic(BaseModel):
     name: str
     timezoneHourOffset: int
     timezoneMinuteOffset: int
-    inverters: list[InverterBasic]
-    parallelGroups: list[ParallelGroupBasic]
+    inverters: list[InverterBasic] = []
+    parallelGroups: list[ParallelGroupBasic] = []
 
 
 class TechInfo(BaseModel):
@@ -490,12 +490,12 @@ class InverterRuntime(BaseModel):
     acCouplePower: int = 0
     # Other fields
     hasEpsOverloadRecoveryTime: bool = False
-    maxChgCurr: int
-    maxDischgCurr: int
+    maxChgCurr: int | None = None
+    maxDischgCurr: int | None = None
     maxChgCurrValue: int | None = None
     maxDischgCurrValue: int | None = None
-    bmsCharge: bool
-    bmsDischarge: bool
+    bmsCharge: bool = False
+    bmsDischarge: bool = False
     bmsForceCharge: bool = False
     # Generator
     _12KUsingGenerator: bool = False

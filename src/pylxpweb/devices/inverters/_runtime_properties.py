@@ -378,7 +378,7 @@ class InverterRuntimePropertiesMixin:
         Returns:
             Max charge current (÷100), or 0.0 if no data.
         """
-        if self._runtime is None:
+        if self._runtime is None or self._runtime.maxChgCurr is None:
             return 0.0
 
         return scale_runtime_value("maxChgCurr", self._runtime.maxChgCurr)
@@ -390,7 +390,7 @@ class InverterRuntimePropertiesMixin:
         Returns:
             Max discharge current (÷100), or 0.0 if no data.
         """
-        if self._runtime is None:
+        if self._runtime is None or self._runtime.maxDischgCurr is None:
             return 0.0
 
         return scale_runtime_value("maxDischgCurr", self._runtime.maxDischgCurr)

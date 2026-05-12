@@ -88,3 +88,8 @@ docs/.doctrees/
 test_api_debug.py
 test_full_data_check.py
 full_data_check_output.txt
+.claude/
+inverter_settings_snapshot.json
+Personal.code-profile
+package.json
+addon-solar_dashboard/.env
