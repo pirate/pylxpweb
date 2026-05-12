@@ -1,0 +1,27 @@
+.env.example
+  s_5a300c8feab054::t_01d076dc2b9019 1-7
+pyproject.toml
+  s_5a300c8feab054::t_01d076dc2b9019 12
+src/pylxpweb/models.py
+  s_5a300c8feab054::t_01d076dc2b9019 161-162,493-494,497-498
+.gitignore
+  s_5a300c8feab054::t_01d076dc2b9019 91-95
+src/pylxpweb/devices/inverters/_runtime_properties.py
+  s_5a300c8feab054::t_01d076dc2b9019 381,393
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "97feb5d68c483a4caa35f992be64e5aa4fa53622",
+  "prompts": {},
+  "sessions": {
+    "s_5a300c8feab054": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb927930-58d5-41d1-8103-42fcc934a2f7",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Nick Sweeting <git@sweeting.me>"
+    }
+  }
+}
