@@ -748,6 +748,10 @@ HTML_TEMPLATE = '''
         .power-card .value.battery.charging { color: #2ecc71; }
         .power-card .value.battery.discharging { color: #3498db; }
         .power-card .value.battery.idle { color: #888; }
+        .power-card .value.grid { color: #95a5a6; }
+        .power-card .value.grid.exporting { color: #2ecc71; }
+        .power-card .value.grid.importing { color: #e74c3c; }
+        .power-card .value.grid.idle { color: #888; }
         .power-card-meta {
             display: flex;
             justify-content: space-between;
@@ -769,6 +773,12 @@ HTML_TEMPLATE = '''
         }
         .performance-bar .fill.battery {
             background: linear-gradient(90deg, #3498db, #9b59b6);
+        }
+        .performance-bar .fill.grid {
+            background: linear-gradient(90deg, #95a5a6, #2ecc71);
+        }
+        .performance-bar .fill.grid.importing {
+            background: linear-gradient(90deg, #95a5a6, #e74c3c);
         }
         .mppt-zero .mppt-row,
         .mppt-zero .legend {
@@ -1067,6 +1077,17 @@ HTML_TEMPLATE = '''
                     </div>
                     <div class="power-card-meta">
                         <span id="battery-load-text">--% of 12 kW</span>
+                        <span>12 kW max</span>
+                    </div>
+                </div>
+                <div class="power-card">
+                    <div class="label">Grid Power</div>
+                    <div class="value grid idle" id="grid-top-power">--</div>
+                    <div class="performance-bar">
+                        <div class="fill grid" id="grid-load-fill" style="width: 0%"></div>
+                    </div>
+                    <div class="power-card-meta">
+                        <span id="grid-load-text">--% of 12 kW</span>
                         <span>12 kW max</span>
                     </div>
                 </div>
@@ -1834,11 +1855,16 @@ HTML_TEMPLATE = '''
         function updatePowerLoadCard(kind, watts) {
             const value = numericPower(watts);
             const loadPercent = Math.min(100, Math.abs(value) / POWER_LOAD_MAX_W * 100);
-            const valueEl = document.getElementById(kind === 'battery' ? 'battery-top-power' : 'total-pv');
+            const valueElId = (kind === 'battery') ? 'battery-top-power'
+                            : (kind === 'grid')    ? 'grid-top-power'
+                            : 'total-pv';
+            const valueEl = document.getElementById(valueElId);
             const fillEl = document.getElementById(kind + '-load-fill');
             const textEl = document.getElementById(kind + '-load-text');
 
-            valueEl.textContent = kind === 'battery' ? formatSignedPower(value) : formatPower(value);
+            // PV is always positive (no signed value); battery + grid show +/-
+            const signed = (kind === 'battery' || kind === 'grid');
+            valueEl.textContent = signed ? formatSignedPower(value) : formatPower(value);
             fillEl.style.width = loadPercent.toFixed(1) + '%';
             textEl.textContent = loadPercent.toFixed(0) + '% of 12 kW';
 
@@ -1846,6 +1872,12 @@ HTML_TEMPLATE = '''
                 valueEl.classList.toggle('charging', value > 0);
                 valueEl.classList.toggle('discharging', value < 0);
                 valueEl.classList.toggle('idle', value === 0);
+            } else if (kind === 'grid') {
+                // Positive = exporting (good, money in), negative = importing (bad, money out)
+                valueEl.classList.toggle('exporting', value > 0);
+                valueEl.classList.toggle('importing', value < 0);
+                valueEl.classList.toggle('idle', value === 0);
+                fillEl.classList.toggle('importing', value < 0);
             }
         }
 
@@ -2374,8 +2406,11 @@ HTML_TEMPLATE = '''
                     const inv = data.inverter;
                     const pvPower = numericPower(inv.pv_total_power);
                     const battPower = numericPower(inv.battery_charge_power) - numericPower(inv.battery_discharge_power);
+                    // Net grid: + = exporting to grid, - = importing from grid
+                    const gridPower = numericPower(inv.power_to_grid) - numericPower(inv.power_to_user);
                     updatePowerLoadCard('pv', pvPower);
                     updatePowerLoadCard('battery', battPower);
+                    updatePowerLoadCard('grid', gridPower);
 
                     // MPPT optimal voltage range for FlexBOSS21 — outside this range
                     // the MPPT efficiency drops noticeably. Color-code voltages so
