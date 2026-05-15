@@ -722,6 +722,19 @@ HTML_TEMPLATE = '''
             padding: 0;
             background: transparent;
         }
+        /* Responsive card grid: auto-fits as many ~260px columns as the
+           container width allows. On narrow sidebars (e.g. <540px) this
+           collapses to a single column; on the full-width HASS kiosk view
+           it expands to 2 / 3 / 4 columns side-by-side. */
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 12px;
+            margin: 0;
+        }
+        .card-grid > .section {
+            margin: 0;
+        }
         .power-card {
             min-width: 0;
             background: rgba(255,255,255,0.05);
@@ -1222,6 +1235,12 @@ HTML_TEMPLATE = '''
                 </div>
             </div>
 
+            <!-- Wrap Battery / Grid / Inverter / Today's Energy in a responsive
+                 grid that auto-fits as many columns as fit, with each column at
+                 least ~260px wide. On a narrow phone-style sidebar these stack
+                 vertically; on the full-width HASS kiosk they sit side-by-side. -->
+            <div class="card-grid">
+
             <div class="section">
                 <div class="section-title"><span class="icon">🔋</span> Battery</div>
                 <div class="stat-row">
@@ -1313,6 +1332,8 @@ HTML_TEMPLATE = '''
                     <span class="stat-value" id="energy-discharge">-- kWh</span>
                 </div>
             </div>
+
+            </div><!-- /.card-grid -->
 
             <div class="section">
                 <div class="section-title"><span class="icon">🕒</span> TOU & Mode</div>
