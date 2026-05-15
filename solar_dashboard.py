@@ -759,6 +759,53 @@ HTML_TEMPLATE = '''
             color: #888;
             font-size: 0.75em;
         }
+        .power-card-summary {
+            margin-top: 4px;
+            font-size: 0.78em;
+            color: #aaa;
+            font-variant-numeric: tabular-nums;
+        }
+        .power-card-summary .pos { color: #2ecc71; }
+        .power-card-summary .neg { color: #e74c3c; }
+        .sun-row {
+            display: flex;
+            justify-content: center;
+            gap: 14px;
+            margin: -4px 0 14px 0;
+            font-size: 0.85em;
+            color: #aaa;
+            font-variant-numeric: tabular-nums;
+        }
+        .sun-row-label { font-size: 1.1em; }
+        .sun-row-time { letter-spacing: 0.02em; }
+        .event-row {
+            display: flex;
+            gap: 10px;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 0.85em;
+        }
+        .event-row:last-child { border-bottom: none; }
+        .event-time {
+            color: #aaa;
+            min-width: 70px;
+            font-variant-numeric: tabular-nums;
+        }
+        .event-details { flex: 1; }
+        .event-reason {
+            color: #e67e22;
+            font-weight: 600;
+        }
+        .event-meta {
+            color: #888;
+            font-size: 0.88em;
+        }
+        .event-empty {
+            color: #2ecc71;
+            text-align: center;
+            padding: 12px 0;
+            font-size: 0.9em;
+        }
         .performance-bar {
             height: 8px;
             background: rgba(255,255,255,0.1);
@@ -1068,6 +1115,7 @@ HTML_TEMPLATE = '''
                         <span id="pv-load-text">--% of 12 kW</span>
                         <span>12 kW max</span>
                     </div>
+                    <div class="power-card-summary" id="pv-summary">today: -- kWh</div>
                 </div>
                 <div class="power-card">
                     <div class="label">Battery Power</div>
@@ -1079,6 +1127,7 @@ HTML_TEMPLATE = '''
                         <span id="battery-load-text">--% of 12 kW</span>
                         <span>12 kW max</span>
                     </div>
+                    <div class="power-card-summary" id="battery-summary">today: ↓-- / ↑-- kWh</div>
                 </div>
                 <div class="power-card">
                     <div class="label">Grid Power</div>
@@ -1090,30 +1139,27 @@ HTML_TEMPLATE = '''
                         <span id="grid-load-text">--% of 12 kW</span>
                         <span>12 kW max</span>
                     </div>
+                    <div class="power-card-summary" id="grid-summary">today: +-- / --- kWh</div>
                 </div>
             </div>
 
             <div class="section">
-                <div class="section-title"><span class="icon">☀️</span> Sun Position</div>
-                <div class="stat-row">
-                    <span class="stat-label">Altitude</span>
-                    <span class="stat-value" id="sun-altitude">--°</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Azimuth</span>
-                    <span class="stat-value" id="sun-azimuth">--°</span>
-                </div>
-                <div class="sun-info" style="margin-top:15px;">
-                    <div class="time-block">
-                        <div class="label">Sunrise</div>
-                        <div class="time" id="sunrise">--:--</div>
-                    </div>
-                    <div class="time-block">
-                        <div class="label">Sunset</div>
-                        <div class="time" id="sunset">--:--</div>
-                    </div>
+                <div class="section-title"><span class="icon">⚠️</span> Today's Import Events</div>
+                <div id="import-events-list">
+                    <div class="event-empty">No imports today ✓</div>
                 </div>
             </div>
+
+            <div class="sun-row">
+                <span class="sun-row-label">☀</span>
+                <span class="sun-row-time">↑ <span id="sunrise">--:--</span></span>
+                <span class="sun-row-time">↓ <span id="sunset">--:--</span></span>
+            </div>
+            <!-- Hidden — these change but are only useful for the 3D animation,
+                 not as readable stats. Kept in DOM so updateSunPosition / data
+                 fetch code doesn't have to special-case them. -->
+            <span id="sun-altitude" style="display:none">--°</span>
+            <span id="sun-azimuth" style="display:none">--°</span>
 
             <div class="section" id="pv-arrays-section">
                 <div class="section-title"><span class="icon">⚡</span> PV Arrays</div>
@@ -1545,6 +1591,38 @@ HTML_TEMPLATE = '''
             // Start data polling — this is what makes the side panel show numbers
             fetchData();
             setInterval(fetchData, 5000);
+            // Events poll separately (slower — events change at minute-scale)
+            fetchEvents();
+            setInterval(fetchEvents, 60000);
+        }
+
+        async function fetchEvents() {
+            try {
+                const r = await fetch('/api/events');
+                const data = await r.json();
+                const listEl = document.getElementById('import-events-list');
+                if (!listEl) return;
+                if (!data.events || data.events.length === 0) {
+                    listEl.innerHTML = '<div class="event-empty">No imports today ✓</div>';
+                    return;
+                }
+                // Render newest first
+                listEl.innerHTML = data.events.slice().reverse().map(ev => {
+                    const timeStr = ev.duration_min > 5
+                        ? `${ev.start}–${ev.end}` : ev.start;
+                    const socStr = ev.soc != null ? ` · SOC ${ev.soc}%` : '';
+                    const pvStr = ev.ppv != null && ev.ppv > 100 ? ` · PV ${(ev.ppv/1000).toFixed(1)}kW` : '';
+                    return `<div class="event-row">
+                        <div class="event-time">${timeStr}</div>
+                        <div class="event-details">
+                            <div class="event-reason">${ev.reason}</div>
+                            <div class="event-meta">~${ev.kwh.toFixed(3)} kWh · peak ${ev.peak_w}W · ${ev.duration_min.toFixed(0)}min${socStr}${pvStr}</div>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (err) {
+                console.error('events fetch failed:', err);
+            }
         }
 
         function updateLegendFromConfig() {
@@ -2482,6 +2560,21 @@ HTML_TEMPLATE = '''
                     document.getElementById('energy-charge').textContent    = fmtKWh(inv.energy_today_charge);
                     document.getElementById('energy-discharge').textContent = fmtKWh(inv.energy_today_discharge);
 
+                    // Daily totals shown under each power card
+                    const yld = (inv.energy_today_yield || 0).toFixed(1);
+                    const chg = (inv.energy_today_charge || 0).toFixed(1);
+                    const dis = (inv.energy_today_discharge || 0).toFixed(1);
+                    const exp = (inv.energy_today_export || 0).toFixed(1);
+                    const imp = (inv.energy_today_import || 0).toFixed(1);
+                    document.getElementById('pv-summary').innerHTML =
+                        `today: <span class="pos">${yld}</span> kWh generated`;
+                    document.getElementById('battery-summary').innerHTML =
+                        `today: <span class="pos">+${chg}</span> charged · ` +
+                        `<span class="neg">−${dis}</span> discharged kWh`;
+                    document.getElementById('grid-summary').innerHTML =
+                        `today: <span class="pos">+${exp}</span> exported · ` +
+                        `<span class="${(inv.energy_today_import || 0) > 0.05 ? 'neg' : 'pos'}">−${imp}</span> imported kWh`;
+
                     // Color import red if non-zero
                     const importEl = document.getElementById('energy-import');
                     importEl.classList.toggle('bad', (inv.energy_today_import || 0) > 0.05);
@@ -2821,6 +2914,158 @@ def get_data():
         "inverter": inverter_data,
         "schedule": schedule,
         "read_only": True,
+    })
+
+
+# Cache today's events for 60s to avoid hammering the inverter API
+_EVENTS_CACHE = {"date": None, "ts": None, "events": []}
+
+
+async def _fetch_today_import_events():
+    """Pull per-4-min pToUser/SOC/ppv chart samples for today and classify
+    each contiguous import event."""
+    from datetime import timedelta as _td
+    now = datetime.now(TIMEZONE)
+    today = now.date().isoformat()
+
+    inverter = _inverter_cache.get("inverter")
+    if not inverter:
+        return []
+    serial = inverter.serial_number
+    client = _inverter_cache.get("client")
+    if not client:
+        return []
+
+    try:
+        ptouser, soc, ppv = await asyncio.gather(
+            client.analytics.get_chart_data(serial, "pToUser", today),
+            client.analytics.get_chart_data(serial, "soc", today),
+            client.analytics.get_chart_data(serial, "ppv", today),
+        )
+    except Exception as e:
+        print(f"events fetch error: {e}", flush=True)
+        return []
+
+    # Build lookups for SOC and PV at each sample timestamp
+    soc_lookup = {s.get("time"): s.get("value") for s in soc.get("data", []) if "time" in s}
+    ppv_lookup = {s.get("time"): s.get("value") for s in ppv.get("data", []) if "time" in s}
+
+    # Group consecutive non-zero pToUser samples into events
+    events_raw = []
+    cur = None
+    for s in ptouser.get("data", []):
+        v = s.get("value") or 0
+        t = s.get("time")
+        if not t:
+            continue
+        if v > 10:  # >10 W = real import (filter noise)
+            if cur is None:
+                cur = {"start": t, "end": t, "vals": [v]}
+            else:
+                cur["end"] = t
+                cur["vals"].append(v)
+        else:
+            if cur is not None:
+                events_raw.append(cur)
+                cur = None
+    if cur is not None:
+        events_raw.append(cur)
+
+    # Classify each event
+    out = []
+    for e in events_raw:
+        try:
+            ts_start = datetime.strptime(e["start"], "%Y-%m-%d %H:%M:%S")
+            ts_end = datetime.strptime(e["end"], "%Y-%m-%d %H:%M:%S")
+        except (ValueError, KeyError):
+            continue
+        dur_min = (ts_end - ts_start).total_seconds() / 60 + 4  # +sample window
+        avg_w = sum(e["vals"]) / len(e["vals"])
+        peak_w = max(e["vals"])
+        kwh = sum(e["vals"]) * 240 / 3600 / 1000  # 4-min samples → kWh
+        soc_at = soc_lookup.get(e["start"])
+        ppv_at = ppv_lookup.get(e["start"])
+        hour = ts_start.hour
+
+        reason = _classify_import_event(
+            hour=hour,
+            dur_min=dur_min,
+            peak_w=peak_w,
+            avg_w=avg_w,
+            soc=soc_at,
+            ppv=ppv_at,
+        )
+        out.append({
+            "start": ts_start.strftime("%H:%M"),
+            "end": ts_end.strftime("%H:%M"),
+            "duration_min": round(dur_min, 1),
+            "peak_w": int(peak_w),
+            "kwh": round(kwh, 3),
+            "soc": int(soc_at) if soc_at is not None else None,
+            "ppv": int(ppv_at) if ppv_at is not None else None,
+            "reason": reason,
+        })
+    return out
+
+
+def _classify_import_event(*, hour, dur_min, peak_w, avg_w, soc, ppv):
+    """Heuristic classifier for import events.
+
+    Pattern catalog (from analyze_imports.py findings):
+      - Pattern 1: Overnight battery floor exhaustion
+      - Pattern 2: Mid-day CT dead-band / MPPT priority inversion
+      - Pattern 3: Evening high-SOC discharge holdoff
+      - Auto-AC-charge-from-grid (rescue cycle)
+      - Brief load surge (catchall)
+    """
+    soc_v = soc if soc is not None else -1
+
+    # Auto-AC-charge rescue: long high-power import during BAT_FIRST hours (1-6 AM)
+    if 1 <= hour <= 6 and dur_min > 30 and peak_w > 4000 and 0 <= soc_v < 30:
+        return "Auto-AC-charge rescue (battery hit BAT_FIRST trigger)"
+    # Pattern 1: Overnight floor exhaustion
+    if hour < 8 and 0 <= soc_v < 20:
+        return "Battery hit overnight discharge floor"
+    # Pattern 2: Mid-day load spike (SOC + time + short duration are sufficient)
+    if 9 <= hour < 16 and soc_v > 70 and dur_min < 15:
+        return "Brief load spike (CT dead-band, mid-day)"
+    # Pattern 3: Evening high-SOC holdoff (battery refuses to discharge)
+    if 16 <= hour < 21 and soc_v > 80 and dur_min < 60:
+        return "Evening high-SOC discharge holdoff"
+    # Short transient (catchall)
+    if dur_min <= 5:
+        return "Brief load surge (transient)"
+    if 0 <= soc_v < 15:
+        return "Low SOC — battery couldn't cover load"
+    return "Unclassified import event"
+
+
+def _events_sync():
+    """Sync wrapper for the events fetch; reuses the dashboard's persistent loop."""
+    today = datetime.now(TIMEZONE).date().isoformat()
+    if (_EVENTS_CACHE["date"] == today and _EVENTS_CACHE["ts"] and
+            (datetime.now() - _EVENTS_CACHE["ts"]).total_seconds() < 60):
+        return _EVENTS_CACHE["events"]
+    loop = _inverter_cache.get("loop")
+    if loop is None or loop.is_closed():
+        return _EVENTS_CACHE["events"]
+    try:
+        events = loop.run_until_complete(_fetch_today_import_events())
+    except Exception as e:
+        print(f"events sync error: {e}", flush=True)
+        events = _EVENTS_CACHE.get("events", [])
+    _EVENTS_CACHE["date"] = today
+    _EVENTS_CACHE["ts"] = datetime.now()
+    _EVENTS_CACHE["events"] = events
+    return events
+
+
+@app.route('/api/events')
+def get_events():
+    """Return today's classified import events."""
+    return jsonify({
+        "date": datetime.now(TIMEZONE).date().isoformat(),
+        "events": _events_sync(),
     })
 
 
