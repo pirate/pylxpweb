@@ -137,6 +137,9 @@ SOLAR_ARRAYS = [
 # =============================================================================
 TOTAL_ARRAY_KW = sum(arr["capacity_kw"] for arr in SOLAR_ARRAYS)
 
+# Combined battery pack capacity (32 kWh Docan + 14 kWh EG4 paralleled)
+TOTAL_BATTERY_KWH = 46.0
+
 # Roof properties derived from roof arrays
 _roof_arrays = [a for a in SOLAR_ARRAYS if a.get("type") == "roof"]
 ROOF_TILT = _roof_arrays[0]["tilt"] if _roof_arrays else 10.0
@@ -714,28 +717,28 @@ HTML_TEMPLATE = '''
         .mppt-detail .stat-value { font-size: 0.85em; opacity: 0.8; }
         .power-summary {
             display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 10px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 6px;
             padding: 0;
             background: transparent;
         }
         .power-card {
             min-width: 0;
             background: rgba(255,255,255,0.05);
-            border-radius: 12px;
-            padding: 14px;
+            border-radius: 10px;
+            padding: 10px 8px;
         }
         .power-card .label {
             color: #888;
-            font-size: 0.72em;
+            font-size: 0.62em;
             text-transform: uppercase;
-            letter-spacing: 0.08em;
+            letter-spacing: 0.06em;
         }
         .power-card .value {
             margin-top: 4px;
-            font-size: 1.9em;
+            font-size: 1.25em;
             font-weight: 700;
-            line-height: 1;
+            line-height: 1.05;
             font-variant-numeric: tabular-nums;
             overflow-wrap: anywhere;
         }
@@ -755,15 +758,16 @@ HTML_TEMPLATE = '''
         .power-card-meta {
             display: flex;
             justify-content: space-between;
-            margin-top: 5px;
+            margin-top: 4px;
             color: #888;
-            font-size: 0.75em;
+            font-size: 0.62em;
         }
         .power-card-summary {
             margin-top: 4px;
-            font-size: 0.78em;
+            font-size: 0.66em;
             color: #aaa;
             font-variant-numeric: tabular-nums;
+            line-height: 1.3;
         }
         .power-card-summary .pos { color: #2ecc71; }
         .power-card-summary .neg { color: #e74c3c; }
@@ -812,6 +816,11 @@ HTML_TEMPLATE = '''
             border-radius: 4px;
             overflow: hidden;
             margin-top: 10px;
+        }
+        .performance-bar.daily-bar {
+            height: 6px;
+            margin-top: 7px;
+            opacity: 0.7;
         }
         .performance-bar .fill {
             height: 100%;
@@ -1112,34 +1121,52 @@ HTML_TEMPLATE = '''
                         <div class="fill" id="pv-load-fill" style="width: 0%"></div>
                     </div>
                     <div class="power-card-meta">
-                        <span id="pv-load-text">--% of 12 kW</span>
-                        <span>12 kW max</span>
+                        <span id="pv-load-text">--%</span>
+                        <span>of 12 kW now</span>
                     </div>
-                    <div class="power-card-summary" id="pv-summary">today: -- kWh</div>
+                    <div class="performance-bar daily-bar">
+                        <div class="fill" id="pv-daily-fill" style="width: 0%"></div>
+                    </div>
+                    <div class="power-card-meta">
+                        <span id="pv-daily-text">--</span>
+                        <span id="pv-daily-target">of -- max</span>
+                    </div>
                 </div>
                 <div class="power-card">
-                    <div class="label">Battery Power</div>
+                    <div class="label">Battery</div>
                     <div class="value battery idle" id="battery-top-power">--</div>
                     <div class="performance-bar">
                         <div class="fill battery" id="battery-load-fill" style="width: 0%"></div>
                     </div>
                     <div class="power-card-meta">
-                        <span id="battery-load-text">--% of 12 kW</span>
-                        <span>12 kW max</span>
+                        <span id="battery-load-text">--%</span>
+                        <span>of 12 kW now</span>
                     </div>
-                    <div class="power-card-summary" id="battery-summary">today: ↓-- / ↑-- kWh</div>
+                    <div class="performance-bar daily-bar">
+                        <div class="fill battery" id="battery-daily-fill" style="width: 0%"></div>
+                    </div>
+                    <div class="power-card-meta">
+                        <span id="battery-daily-text">--</span>
+                        <span id="battery-daily-target">of -- cap</span>
+                    </div>
                 </div>
                 <div class="power-card">
-                    <div class="label">Grid Power</div>
+                    <div class="label">Grid</div>
                     <div class="value grid idle" id="grid-top-power">--</div>
                     <div class="performance-bar">
                         <div class="fill grid" id="grid-load-fill" style="width: 0%"></div>
                     </div>
                     <div class="power-card-meta">
-                        <span id="grid-load-text">--% of 12 kW</span>
-                        <span>12 kW max</span>
+                        <span id="grid-load-text">--%</span>
+                        <span>of 12 kW now</span>
                     </div>
-                    <div class="power-card-summary" id="grid-summary">today: +-- / --- kWh</div>
+                    <div class="performance-bar daily-bar">
+                        <div class="fill grid" id="grid-daily-fill" style="width: 0%"></div>
+                    </div>
+                    <div class="power-card-meta">
+                        <span id="grid-daily-text">--</span>
+                        <span id="grid-daily-target">of -- max</span>
+                    </div>
                 </div>
             </div>
 
@@ -1944,7 +1971,7 @@ HTML_TEMPLATE = '''
             const signed = (kind === 'battery' || kind === 'grid');
             valueEl.textContent = signed ? formatSignedPower(value) : formatPower(value);
             fillEl.style.width = loadPercent.toFixed(1) + '%';
-            textEl.textContent = loadPercent.toFixed(0) + '% of 12 kW';
+            textEl.textContent = loadPercent.toFixed(0) + '%';
 
             if (kind === 'battery') {
                 valueEl.classList.toggle('charging', value > 0);
@@ -2560,20 +2587,36 @@ HTML_TEMPLATE = '''
                     document.getElementById('energy-charge').textContent    = fmtKWh(inv.energy_today_charge);
                     document.getElementById('energy-discharge').textContent = fmtKWh(inv.energy_today_discharge);
 
-                    // Daily totals shown under each power card
-                    const yld = (inv.energy_today_yield || 0).toFixed(1);
-                    const chg = (inv.energy_today_charge || 0).toFixed(1);
-                    const dis = (inv.energy_today_discharge || 0).toFixed(1);
-                    const exp = (inv.energy_today_export || 0).toFixed(1);
-                    const imp = (inv.energy_today_import || 0).toFixed(1);
-                    document.getElementById('pv-summary').innerHTML =
-                        `today: <span class="pos">${yld}</span> kWh generated`;
-                    document.getElementById('battery-summary').innerHTML =
-                        `today: <span class="pos">+${chg}</span> charged · ` +
-                        `<span class="neg">−${dis}</span> discharged kWh`;
-                    document.getElementById('grid-summary').innerHTML =
-                        `today: <span class="pos">+${exp}</span> exported · ` +
-                        `<span class="${(inv.energy_today_import || 0) > 0.05 ? 'neg' : 'pos'}">−${imp}</span> imported kWh`;
+                    // Daily-totals bars under each power card.
+                    //   PV:      generated kWh        / expected_daily_kwh
+                    //   Battery: charged + discharged / battery capacity (46 kWh)
+                    //   Grid:    exported kWh         / (50% of expected daily)
+                    const yld = inv.energy_today_yield || 0;
+                    const chg = inv.energy_today_charge || 0;
+                    const dis = inv.energy_today_discharge || 0;
+                    const exp = inv.energy_today_export || 0;
+                    const imp = inv.energy_today_import || 0;
+
+                    const expectedDaily = data.expected_daily_kwh || 0;
+                    const batCap = data.total_battery_kwh || 46;
+                    const exportTarget = expectedDaily * 0.5;
+
+                    const setDaily = (kind, current, target, label) => {
+                        const pct = target > 0 ? Math.min(100, current / target * 100) : 0;
+                        document.getElementById(kind + '-daily-fill').style.width = pct.toFixed(1) + '%';
+                        document.getElementById(kind + '-daily-text').textContent = label;
+                        document.getElementById(kind + '-daily-target').textContent =
+                            'of ' + target.toFixed(0) + ' max';
+                    };
+
+                    setDaily('pv', yld, expectedDaily,
+                             `${yld.toFixed(1)} kWh today`);
+                    setDaily('battery', chg + dis, batCap,
+                             `${(chg+dis).toFixed(1)} kWh cycled`);
+                    document.getElementById('battery-daily-target').textContent =
+                        `${batCap.toFixed(0)} kWh cap`;
+                    setDaily('grid', exp, exportTarget,
+                             `+${exp.toFixed(1)}${imp > 0.05 ? ' / -' + imp.toFixed(1) : ''} kWh`);
 
                     // Color import red if non-zero
                     const importEl = document.getElementById('energy-import');
@@ -2910,11 +2953,60 @@ def get_data():
         },
         "sun_path": sun_path,
         "expected_power": expected_power,
+        "expected_daily_kwh": _expected_daily_kwh_for(now.date()),
+        "total_battery_kwh": TOTAL_BATTERY_KWH,
         "dni": dni,
         "inverter": inverter_data,
         "schedule": schedule,
         "read_only": True,
     })
+
+
+# Cache the expected daily kWh (changes only when date changes)
+_EXPECTED_DAILY_CACHE = {"date": None, "kwh": 0.0}
+
+
+def _expected_daily_kwh_for(date):
+    """Integrate the aspirational expected-power model across the daylight hours
+    to get a daily kWh ceiling. Used as the denominator for the daily-total bars
+    on the dashboard cards. Cached per-date."""
+    cache = _EXPECTED_DAILY_CACHE
+    iso = date.isoformat()
+    if cache["date"] == iso:
+        return cache["kwh"]
+
+    total_wh = 0.0
+    # Sample every 30 min; sum (power × time-slot) = energy
+    for hour in range(24):
+        for minute in (0, 30):
+            t = datetime(date.year, date.month, date.day, hour, minute,
+                         tzinfo=TIMEZONE)
+            pos = calculate_solar_position(t, LATITUDE, LONGITUDE)
+            if pos["altitude"] <= 0:
+                continue
+            dni = calculate_clear_sky_dni(pos["altitude"])
+            slot_power_w = 0.0
+            for array in SOLAR_ARRAYS:
+                if array.get("type") == "split":
+                    azimuths = array["azimuth"]
+                    fractions = array.get("fractions",
+                                          [1.0 / len(azimuths)] * len(azimuths))
+                    irr = sum(
+                        f * calculate_panel_irradiance(
+                            pos["altitude"], pos["azimuth"],
+                            array["tilt"], az, dni)
+                        for az, f in zip(azimuths, fractions)
+                    )
+                else:
+                    irr = calculate_panel_irradiance(
+                        pos["altitude"], pos["azimuth"],
+                        array["tilt"], array["azimuth"], dni)
+                slot_power_w += array["capacity_kw"] * 1000 * (irr / 1000) * SYSTEM_EFFICIENCY
+            total_wh += slot_power_w * 0.5  # 30-min slot
+
+    cache["date"] = iso
+    cache["kwh"] = total_wh / 1000
+    return cache["kwh"]
 
 
 # Cache today's events for 60s to avoid hammering the inverter API
