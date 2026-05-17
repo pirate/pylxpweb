@@ -396,6 +396,8 @@ def calculate_panel_irradiance(sun_alt: float, sun_az: float, panel_tilt: float,
 # INVERTER DATA FETCHING
 # =============================================================================
 
+import threading
+
 # Global cache for inverter data and persistent client
 _inverter_cache = {
     "data": None,
@@ -404,6 +406,11 @@ _inverter_cache = {
     "inverter": None,
     "loop": None
 }
+
+# Flask is multi-threaded — serialize access to the shared asyncio loop so two
+# concurrent requests can't both call run_until_complete() (which would throw
+# "This event loop is already running" on the second one).
+_LOOP_LOCK = threading.Lock()
 
 
 def compute_schedule_status(now: datetime, inverter_data: dict | None) -> dict:
@@ -589,11 +596,13 @@ async def fetch_inverter_data():
 def get_inverter_data_sync():
     """Synchronous wrapper for async inverter fetch with persistent event loop."""
     global _inverter_cache
-    # Reuse the same event loop to keep client connections alive
-    if _inverter_cache["loop"] is None or _inverter_cache["loop"].is_closed():
-        _inverter_cache["loop"] = asyncio.new_event_loop()
-        asyncio.set_event_loop(_inverter_cache["loop"])
-    return _inverter_cache["loop"].run_until_complete(fetch_inverter_data())
+    # Reuse the same event loop to keep client connections alive. Serialize via
+    # _LOOP_LOCK so two Flask threads can't drive the same loop concurrently.
+    with _LOOP_LOCK:
+        if _inverter_cache["loop"] is None or _inverter_cache["loop"].is_closed():
+            _inverter_cache["loop"] = asyncio.new_event_loop()
+            asyncio.set_event_loop(_inverter_cache["loop"])
+        return _inverter_cache["loop"].run_until_complete(fetch_inverter_data())
 
 
 async def fetch_all_parameters():
@@ -642,6 +651,44 @@ def get_all_parameters_sync():
 # =============================================================================
 
 app = Flask(__name__)
+
+
+# Watchdog: every 3 hours, drop the asyncio loop + inverter cache so the next
+# request rebuilds them fresh. Cheaper than exiting + container restart, and
+# clears any accumulated state (stale session cookies, leaked tasks, etc.).
+_WATCHDOG_INTERVAL_SEC = 3 * 60 * 60
+
+
+def _watchdog_reset():
+    """Reset the inverter cache + asyncio loop in a thread-safe way."""
+    global _inverter_cache
+    with _LOOP_LOCK:
+        old_loop = _inverter_cache.get("loop")
+        _inverter_cache["client"] = None
+        _inverter_cache["inverter"] = None
+        _inverter_cache["loop"] = None
+        if old_loop and not old_loop.is_closed():
+            try:
+                old_loop.close()
+            except Exception as e:
+                print(f"watchdog: error closing loop: {e}", flush=True)
+    print(f"watchdog: reset inverter cache at {datetime.now().isoformat()}",
+          flush=True)
+
+
+def _watchdog_loop():
+    """Background thread that triggers the watchdog reset every N seconds."""
+    import time as _time
+    while True:
+        _time.sleep(_WATCHDOG_INTERVAL_SEC)
+        try:
+            _watchdog_reset()
+        except Exception as e:
+            print(f"watchdog: error during reset: {e}", flush=True)
+
+
+_watchdog_thread = threading.Thread(target=_watchdog_loop, daemon=True)
+_watchdog_thread.start()
 
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
@@ -3154,19 +3201,21 @@ def _classify_import_event(*, hour, dur_min, peak_w, avg_w, soc, ppv):
 
 
 def _events_sync():
-    """Sync wrapper for the events fetch; reuses the dashboard's persistent loop."""
+    """Sync wrapper for the events fetch; reuses the dashboard's persistent loop
+    via _LOOP_LOCK so it doesn't collide with get_inverter_data_sync."""
     today = datetime.now(TIMEZONE).date().isoformat()
     if (_EVENTS_CACHE["date"] == today and _EVENTS_CACHE["ts"] and
             (datetime.now() - _EVENTS_CACHE["ts"]).total_seconds() < 60):
         return _EVENTS_CACHE["events"]
-    loop = _inverter_cache.get("loop")
-    if loop is None or loop.is_closed():
-        return _EVENTS_CACHE["events"]
-    try:
-        events = loop.run_until_complete(_fetch_today_import_events())
-    except Exception as e:
-        print(f"events sync error: {e}", flush=True)
-        events = _EVENTS_CACHE.get("events", [])
+    with _LOOP_LOCK:
+        loop = _inverter_cache.get("loop")
+        if loop is None or loop.is_closed():
+            return _EVENTS_CACHE["events"]
+        try:
+            events = loop.run_until_complete(_fetch_today_import_events())
+        except Exception as e:
+            print(f"events sync error: {e}", flush=True)
+            events = _EVENTS_CACHE.get("events", [])
     _EVENTS_CACHE["date"] = today
     _EVENTS_CACHE["ts"] = datetime.now()
     _EVENTS_CACHE["events"] = events
