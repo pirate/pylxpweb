@@ -584,6 +584,17 @@ def _fetch_weather_sync():
 # user can flip these into the model later if desired.
 
 
+def _read_loadavg():
+    """Return (load_1m, load_5m, load_15m) from /proc/loadavg, or None
+    on platforms where /proc/loadavg isn't available."""
+    try:
+        with open("/proc/loadavg", "r") as f:
+            parts = f.read().split()
+        return float(parts[0]), float(parts[1]), float(parts[2])
+    except Exception:
+        return None
+
+
 # =============================================================================
 # INVERTER DATA FETCHING
 # =============================================================================
@@ -1022,6 +1033,17 @@ HTML_TEMPLATE = '''
         }
         .top-bar-weather .weather-temp  { color: #f1c40f; }
         .top-bar-weather .weather-cloud { color: #95a5a6; }
+        .top-bar-host {
+            display: flex;
+            justify-content: flex-end;
+            gap: 14px;
+            font-size: 0.9em;
+            font-variant-numeric: tabular-nums;
+            color: #95a5a6;
+        }
+        /* Color-code load: <1 ok, 1-2 warm, >2 hot */
+        .top-bar-host .host-load.load-warm { color: #e67e22; }
+        .top-bar-host .host-load.load-hot  { color: #e74c3c; }
         /* Main container fills viewport minus the top bar */
         #container { display: flex; height: calc(100vh - 38px); }
         #canvas-container { flex: 1; position: relative; }
@@ -1813,15 +1835,17 @@ HTML_TEMPLATE = '''
     </style>
 </head>
 <body>
-    <!-- Top bar: live clock + ambient weather (the values the solar
-         model uses for temperature derate + cloud factor). -->
+    <!-- Top bar: outside weather (left), live clock (center), addon
+         host load (right). -->
     <div id="top-bar">
         <div id="top-bar-weather" class="top-bar-weather">
-            <span class="weather-temp" id="weather-temp">-- °C</span>
-            <span class="weather-cloud" id="weather-cloud">-- ☁</span>
+            <span class="weather-temp" id="weather-temp">--</span>
+            <span class="weather-cloud" id="weather-cloud">--</span>
         </div>
         <div id="top-bar-clock" class="top-bar-clock">--:--:--</div>
-        <div id="top-bar-spacer"></div>
+        <div id="top-bar-host" class="top-bar-host">
+            <span class="host-load" id="host-load">load --</span>
+        </div>
     </div>
     <div id="container">
         <div id="canvas-container">
@@ -3447,13 +3471,27 @@ HTML_TEMPLATE = '''
                     document.getElementById('sunset').textContent = formatTime(data.sun.sunset_hour);
                 }
 
-                // Top-bar weather: outside temp + cloud cover (from Open-Meteo)
+                // Top-bar weather: outside temp (F then C) + cloud cover
                 if (data.weather) {
                     const w = data.weather;
                     const tEl = document.getElementById('weather-temp');
                     const cEl = document.getElementById('weather-cloud');
-                    if (tEl) tEl.textContent = (w.temp_c != null) ? `${w.temp_c.toFixed(1)}°C` : '--';
+                    if (tEl) {
+                        if (w.temp_c != null) {
+                            const f = w.temp_c * 9 / 5 + 32;
+                            tEl.textContent = `${f.toFixed(0)}°F (${w.temp_c.toFixed(1)}°C)`;
+                        } else { tEl.textContent = '--'; }
+                    }
                     if (cEl) cEl.textContent = (w.cloud_pct != null) ? `${w.cloud_pct}% ☁` : '--';
+                }
+                // Host load (1-min average from /proc/loadavg)
+                if (data.host && typeof data.host.load_1m === 'number') {
+                    const ld = data.host.load_1m;
+                    const ldEl = document.getElementById('host-load');
+                    ldEl.textContent = `load ${ld.toFixed(2)}`;
+                    ldEl.classList.remove('load-warm', 'load-hot');
+                    if      (ld >= 2) ldEl.classList.add('load-hot');
+                    else if (ld >= 1) ldEl.classList.add('load-warm');
                 }
 
                 // Update sun arc with real path data (only once per session)
@@ -4085,6 +4123,7 @@ def get_data():
         # window in effect at that sample's timestamp).
         "today_money": _today_money_sync(),
         "weather": (lambda tc: {"temp_c": tc[0], "cloud_pct": tc[1]})(_fetch_weather_sync()),
+        "host": (lambda la: {"load_1m": la[0]} if la else None)(_read_loadavg()),
         "read_only": True,
     })
 

@@ -1,5 +1,5 @@
 name: Solar Dashboard
-version: "1.8.18"
+version: "1.8.19"
 slug: solar_dashboard
 description: 3D solar/battery/grid live dashboard for EG4/Luxpower (read-only)
 url: https://github.com/joyfulhouse/pylxpweb
