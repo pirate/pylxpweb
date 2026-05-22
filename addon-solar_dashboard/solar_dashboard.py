@@ -1183,6 +1183,11 @@ HTML_TEMPLATE = '''
             font-size: 0.85em;
         }
         .event-row:last-child { border-bottom: none; }
+        /* BMS limit-change events: distinct color from import events.
+           Downgrade = orange (concerning), upgrade = green (recovery). */
+        .event-row.event-bms .event-reason { font-weight: 600; }
+        .event-row.event-bms-down .event-reason { color: #e67e22; }
+        .event-row.event-bms-up .event-reason { color: #2ecc71; }
         .event-time {
             color: #aaa;
             min-width: 70px;
@@ -2183,27 +2188,57 @@ HTML_TEMPLATE = '''
                 const data = await r.json();
                 const listEl = document.getElementById('import-events-list');
                 if (!listEl) return;
+
+                // Daily counter vs sum of import events — if there's a
+                // gap, that's brief imports that fell between the 4-min
+                // chart-data samples. Show it as a footer note so the
+                // user knows the events list is a lower bound.
+                let unaccountedNote = '';
+                if (typeof window._lastInvDailyImport === 'number') {
+                    const dailyKwh = window._lastInvDailyImport;
+                    const captured = (data.events || [])
+                        .filter(e => (e.type || 'import') === 'import')
+                        .reduce((s, e) => s + (e.kwh || 0), 0);
+                    const gap = dailyKwh - captured;
+                    if (gap > 0.005) {
+                        unaccountedNote = `<div class="event-meta" style="padding:6px 0;color:#888;">+ ${gap.toFixed(3)} kWh unaccounted (brief imports between 4-min samples)</div>`;
+                    }
+                }
+
                 if (!data.events || data.events.length === 0) {
-                    listEl.innerHTML = '<div class="event-empty">No imports in the last 24h ✓</div>';
+                    listEl.innerHTML = '<div class="event-empty">No events in the last 24h ✓</div>'
+                                       + unaccountedNote;
                     return;
                 }
-                // Render newest first
-                listEl.innerHTML = data.events.slice().reverse().map(ev => {
-                    const timeStr = ev.duration_min > 5
-                        ? `${ev.start}–${ev.end}` : ev.start;
-                    const socStr = ev.soc != null ? ` · SOC ${ev.soc}%` : '';
-                    const pvStr = ev.ppv != null && ev.ppv > 100 ? ` · PV ${(ev.ppv/1000).toFixed(1)}kW` : '';
-                    return `<div class="event-row">
-                        <div class="event-time">${timeStr}</div>
-                        <div class="event-details">
-                            <div class="event-reason">${ev.reason}</div>
-                            <div class="event-meta">~${ev.kwh.toFixed(3)} kWh · peak ${ev.peak_w}W · ${ev.duration_min.toFixed(0)}min${socStr}${pvStr}</div>
-                        </div>
-                    </div>`;
-                }).join('');
+                // Server already returns newest-first
+                listEl.innerHTML = data.events.map(renderEvent).join('') + unaccountedNote;
             } catch (err) {
                 console.error('events fetch failed:', err);
             }
+        }
+
+        function renderEvent(ev) {
+            // BMS limit-change event (typically correlates with charging stop)
+            if (ev.type === 'bms_charge' || ev.type === 'bms_discharge') {
+                const dir = ev.new_a < ev.prev_a ? 'down' : 'up';
+                return `<div class="event-row event-bms event-bms-${dir}">
+                    <div class="event-time">${ev.start}</div>
+                    <div class="event-details">
+                        <div class="event-reason">⚡ ${ev.reason}</div>
+                    </div>
+                </div>`;
+            }
+            // Default: import event
+            const timeStr = ev.duration_min > 5 ? `${ev.start}–${ev.end}` : ev.start;
+            const socStr = ev.soc != null ? ` · SOC ${ev.soc}%` : '';
+            const pvStr = ev.ppv != null && ev.ppv > 100 ? ` · PV ${(ev.ppv/1000).toFixed(1)}kW` : '';
+            return `<div class="event-row">
+                <div class="event-time">${timeStr}</div>
+                <div class="event-details">
+                    <div class="event-reason">${ev.reason}</div>
+                    <div class="event-meta">~${ev.kwh.toFixed(3)} kWh · peak ${ev.peak_w}W · ${ev.duration_min.toFixed(0)}min${socStr}${pvStr}</div>
+                </div>
+            </div>`;
         }
 
         function createRoad() {
@@ -3288,6 +3323,8 @@ HTML_TEMPLATE = '''
                     const exp = inv.energy_today_export || 0;
                     const imp = inv.energy_today_import || 0;
                     const usage = inv.energy_today_usage || 0;
+                    // Stash so the events renderer can show "unaccounted" delta
+                    window._lastInvDailyImport = imp;
 
                     const expectedDaily = data.expected_daily_kwh || 0;
                     const batCap = data.total_battery_kwh || 46;
@@ -3891,24 +3928,38 @@ async def _fetch_recent_import_events():
 
     ptouser_window = [s for s in ptouser_all if _in_window(s)]
 
-    # Group consecutive non-zero pToUser samples into events
+    # Group consecutive non-zero pToUser samples into events.
+    #   - Threshold lowered to 1W: anything the chart-data reports as
+    #     a non-zero import counts. Smaller samples used to be filtered
+    #     out, leaving a daily-total/event-sum discrepancy.
+    #   - GAP_TOLERANCE: a single 0-W sample inside a stretch of imports
+    #     no longer splits the event into two. The Luxpower chart-data
+    #     resolution sometimes rounds brief imports to 0 even when the
+    #     daily counter shows accumulation.
+    IMPORT_THRESHOLD_W = 1
+    GAP_TOLERANCE = 1   # allow one zero-sample gap before closing event
     events_raw = []
     cur = None
+    gap_streak = 0
     for s in ptouser_window:
         v = s.get("value") or 0
         t = s.get("time")
         if not t:
             continue
-        if v > 10:  # >10 W = real import (filter noise)
+        if v >= IMPORT_THRESHOLD_W:
             if cur is None:
                 cur = {"start": t, "end": t, "vals": [v]}
             else:
                 cur["end"] = t
                 cur["vals"].append(v)
+            gap_streak = 0
         else:
             if cur is not None:
-                events_raw.append(cur)
-                cur = None
+                gap_streak += 1
+                if gap_streak > GAP_TOLERANCE:
+                    events_raw.append(cur)
+                    cur = None
+                    gap_streak = 0
     if cur is not None:
         events_raw.append(cur)
 
@@ -3941,6 +3992,8 @@ async def _fetch_recent_import_events():
         date_prefix = "" if ts_start.date() == datetime.now(TIMEZONE).date() \
                         else ts_start.strftime("%a ")
         out.append({
+            "type": "import",
+            "ts": ts_start.isoformat(),    # for cross-event sort
             "start": date_prefix + _fmt_12h(ts_start),
             "end":   date_prefix + _fmt_12h(ts_end),
             "duration_min": round(dur_min, 1),
@@ -3955,6 +4008,93 @@ async def _fetch_recent_import_events():
 
 # Backwards-compatible alias (old name)
 _fetch_today_import_events = _fetch_recent_import_events
+
+
+async def _fetch_bms_limit_events():
+    """Detect BMS-reported charge/discharge limit changes in the last 24h.
+
+    Field semantics (from inverter chart data):
+        maxChgCurr     = BMS charge-current limit × 10 (so 1600 → 160 A)
+        maxDischgCurr  = BMS discharge-current limit × 10
+
+    When the BMS dynamically downgrades the limit (typically due to cell
+    voltage, temperature, or balance concerns), it often correlates with
+    PV-charging stopping abruptly — useful diagnostic context.
+
+    Returns a list of events compatible with the import-event format,
+    with type="bms_charge" or "bms_discharge".
+    """
+    from datetime import timedelta as _td
+    now = datetime.now(TIMEZONE)
+    today = now.date()
+    yesterday = today - _td(days=1)
+    cutoff = now - _td(hours=24)
+
+    inverter = _inverter_cache.get("inverter")
+    client = _inverter_cache.get("client")
+    if not inverter or not client:
+        return []
+    serial = inverter.serial_number
+
+    try:
+        results = await asyncio.gather(
+            client.analytics.get_chart_data(serial, "maxChgCurr",    yesterday.isoformat()),
+            client.analytics.get_chart_data(serial, "maxDischgCurr", yesterday.isoformat()),
+            client.analytics.get_chart_data(serial, "maxChgCurr",    today.isoformat()),
+            client.analytics.get_chart_data(serial, "maxDischgCurr", today.isoformat()),
+        )
+    except Exception as e:
+        print(f"bms events fetch error: {e}", flush=True)
+        return []
+
+    out = []
+    # Each field: walk samples in time order, emit an event each time the
+    # value changes from the previous sample.
+    for field_idx, (field, kind, label_singular) in enumerate(
+        (("maxChgCurr",    "bms_charge",    "BMS charge limit"),
+         ("maxDischgCurr", "bms_discharge", "BMS discharge limit"))
+    ):
+        # Merge yesterday + today samples for this field
+        all_samples = []
+        for day_idx in (0, 1):
+            r = results[field_idx + day_idx * 2]
+            if isinstance(r, Exception):
+                continue
+            all_samples.extend(r.get("data", []) or [])
+        # Sort by time
+        try:
+            all_samples.sort(key=lambda s: s.get("time", ""))
+        except Exception:
+            continue
+        prev_val = None
+        for s in all_samples:
+            t = s.get("time")
+            v = s.get("value")
+            if not t or v is None:
+                continue
+            v = float(v) / 10.0      # convert deci-amps → amps
+            try:
+                ts = datetime.strptime(t, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TIMEZONE)
+            except ValueError:
+                continue
+            if ts < cutoff:
+                prev_val = v
+                continue
+            if prev_val is not None and v != prev_val:
+                direction = "↓" if v < prev_val else "↑"
+                date_prefix = "" if ts.date() == today \
+                                else ts.strftime("%a ")
+                out.append({
+                    "type":   kind,
+                    "ts":     ts.isoformat(),
+                    "start":  date_prefix + _fmt_12h(ts),
+                    "end":    date_prefix + _fmt_12h(ts),
+                    "reason": f"{label_singular} {direction} {prev_val:.0f}A → {v:.0f}A",
+                    "prev_a": prev_val,
+                    "new_a":  v,
+                })
+            prev_val = v
+    return out
 
 
 def _classify_import_event(*, hour, dur_min, peak_w, avg_w, soc, ppv):
@@ -4001,7 +4141,17 @@ def _events_sync():
         if loop is None or loop.is_closed():
             return _EVENTS_CACHE["events"]
         try:
-            events = loop.run_until_complete(_fetch_today_import_events())
+            # Fetch both event types concurrently then merge in time order
+            async def _gather_all():
+                import_evs, bms_evs = await asyncio.gather(
+                    _fetch_today_import_events(),
+                    _fetch_bms_limit_events(),
+                )
+                merged = (import_evs or []) + (bms_evs or [])
+                # Newest first (ts is ISO, so string sort works)
+                merged.sort(key=lambda e: e.get("ts", ""), reverse=True)
+                return merged
+            events = loop.run_until_complete(_gather_all())
         except Exception as e:
             print(f"events sync error: {e}", flush=True)
             events = _EVENTS_CACHE.get("events", [])
