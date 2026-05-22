@@ -794,7 +794,9 @@ HTML_TEMPLATE = '''
         }
         .power-summary {
             display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            /* 4 cards side-by-side on full-width kiosk, collapses to 2x2 on
+               narrow viewports (each card has a 180px floor). */
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 6px;
             padding: 0;
             background: transparent;
@@ -841,7 +843,8 @@ HTML_TEMPLATE = '''
             align-items: center;
             gap: 6px;
         }
-        .sun-times {
+        .sun-times,
+        .card-meta-tag {
             color: #aaa;
             font-size: 0.62em;
             font-variant-numeric: tabular-nums;
@@ -869,6 +872,8 @@ HTML_TEMPLATE = '''
         .power-card .value.grid.exporting { color: #2ecc71; }
         .power-card .value.grid.importing { color: #e74c3c; }
         .power-card .value.grid.idle { color: #888; }
+        .power-card .value.home { color: #1abc9c; }
+        .power-card .value.home.idle { color: #888; }
         .power-card-meta {
             display: flex;
             justify-content: space-between;
@@ -938,6 +943,9 @@ HTML_TEMPLATE = '''
         }
         .performance-bar .fill.grid.importing {
             background: linear-gradient(90deg, #95a5a6, #e74c3c);
+        }
+        .performance-bar .fill.home {
+            background: linear-gradient(90deg, #1abc9c, #e67e22);
         }
         .mppt-zero .mppt-row {
             display: none;
@@ -1237,7 +1245,13 @@ HTML_TEMPLATE = '''
                     </div>
                 </div>
                 <div class="power-card">
-                    <div class="label">Battery</div>
+                    <div class="power-card-header">
+                        <div class="label">Battery</div>
+                        <div class="card-meta-tag">
+                            <span id="battery-soc">--%</span>
+                            &nbsp;<span id="battery-voltage">-- V</span>
+                        </div>
+                    </div>
                     <div class="value battery idle" id="battery-top-power">--</div>
                     <div class="performance-bar">
                         <div class="fill battery" id="battery-load-fill" style="width: 0%"></div>
@@ -1255,7 +1269,12 @@ HTML_TEMPLATE = '''
                     </div>
                 </div>
                 <div class="power-card">
-                    <div class="label">Grid</div>
+                    <div class="power-card-header">
+                        <div class="label">Grid</div>
+                        <div class="card-meta-tag">
+                            🌡 <span id="inverter-temp">-- °C</span>
+                        </div>
+                    </div>
                     <div class="value grid idle" id="grid-top-power">--</div>
                     <div class="performance-bar">
                         <div class="fill grid" id="grid-load-fill" style="width: 0%"></div>
@@ -1270,6 +1289,24 @@ HTML_TEMPLATE = '''
                     <div class="power-card-meta">
                         <span id="grid-daily-text">--</span>
                         <span id="grid-daily-target">of -- max</span>
+                    </div>
+                </div>
+                <div class="power-card">
+                    <div class="label">Home</div>
+                    <div class="value home idle" id="home-top-power">--</div>
+                    <div class="performance-bar">
+                        <div class="fill home" id="home-load-fill" style="width: 0%"></div>
+                    </div>
+                    <div class="power-card-meta">
+                        <span id="home-load-text">--%</span>
+                        <span>of 20 kW now</span>
+                    </div>
+                    <div class="performance-bar daily-bar">
+                        <div class="fill home" id="home-daily-fill" style="width: 0%"></div>
+                    </div>
+                    <div class="power-card-meta">
+                        <span id="home-daily-text">--</span>
+                        <span id="home-daily-target">usage today</span>
                     </div>
                 </div>
             </div>
@@ -1313,107 +1350,15 @@ HTML_TEMPLATE = '''
 
             </div><!-- /.two-col-row -->
 
-            <!-- Wrap Battery / Grid / Inverter / Today's Energy in a responsive
-                 grid that auto-fits as many columns as fit, with each column at
-                 least ~260px wide. On a narrow phone-style sidebar these stack
-                 vertically; on the full-width HASS kiosk they sit side-by-side. -->
-            <div class="card-grid">
-
-            <div class="section">
-                <div class="section-title"><span class="icon">🔋</span> Battery</div>
-                <div class="stat-row">
-                    <span class="stat-label">State of Charge</span>
-                    <span class="stat-value percent" id="battery-soc">-- %</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Voltage</span>
-                    <span class="stat-value voltage" id="battery-voltage">-- V</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Power</span>
-                    <span class="stat-value power" id="battery-power">-- W</span>
-                </div>
-            </div>
-
-            <div class="section">
-                <div class="section-title"><span class="icon">🔌</span> Grid</div>
-                <div class="stat-row">
-                    <span class="stat-label">Export to Grid</span>
-                    <span class="stat-value power" id="grid-export">-- W</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">To Home</span>
-                    <span class="stat-value power" id="grid-import">-- W</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Voltage</span>
-                    <span class="stat-value voltage" id="grid-voltage">-- V</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Frequency</span>
-                    <span class="stat-value" id="grid-freq">-- Hz</span>
-                </div>
-            </div>
-
-            <div class="section">
-                <div class="section-title"><span class="icon">🌡️</span> Inverter</div>
-                <div class="stat-row">
-                    <span class="stat-label">Output Power</span>
-                    <span class="stat-value power" id="inverter-power">-- W</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Temperature</span>
-                    <span class="stat-value temp" id="inverter-temp">-- °C</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Status</span>
-                    <span class="stat-value good" id="inverter-status">--</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">BMS Max Charge</span>
-                    <span class="stat-value" id="bms-max-charge">-- A</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">BMS Max Discharge</span>
-                    <span class="stat-value" id="bms-max-discharge">-- A</span>
-                </div>
-            </div>
-
-            <div class="section">
-                <div class="section-title"><span class="icon">📊</span> Today's Energy</div>
-                <div class="stat-row">
-                    <span class="stat-label">PV Yield</span>
-                    <span class="stat-value good" id="energy-yield">-- kWh</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Exported to Grid</span>
-                    <span class="stat-value good" id="energy-export">-- kWh</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Imported from Grid</span>
-                    <span class="stat-value bad" id="energy-import">-- kWh</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Home Usage</span>
-                    <span class="stat-value" id="energy-usage">-- kWh</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Battery Charged</span>
-                    <span class="stat-value" id="energy-charge">-- kWh</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Battery Discharged</span>
-                    <span class="stat-value" id="energy-discharge">-- kWh</span>
-                </div>
-            </div>
-
-            </div><!-- /.card-grid -->
-
             <div class="section">
                 <div class="section-title"><span class="icon">🕒</span> TOU & Mode</div>
                 <div class="stat-row">
                     <span class="stat-label">Mode</span>
-                    <span class="stat-value" id="op-mode">--</span>
+                    <span class="stat-value">
+                        <span id="op-mode">--</span>
+                        &nbsp;·&nbsp;
+                        <span class="good" id="inverter-status">--</span>
+                    </span>
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">PG&amp;E Period</span>
@@ -2024,7 +1969,8 @@ HTML_TEMPLATE = '''
             return watts.toLocaleString() + 'W';
         }
 
-        const POWER_LOAD_MAX_W = 12000;
+        const POWER_LOAD_MAX_W = 12000;   // PV / Battery / Grid bar denominator
+        const HOME_LOAD_MAX_W  = 20000;   // Home consumption bar denominator
 
         function numericPower(watts) {
             const value = Number(watts);
@@ -2038,15 +1984,17 @@ HTML_TEMPLATE = '''
 
         function updatePowerLoadCard(kind, watts) {
             const value = numericPower(watts);
-            const loadPercent = Math.min(100, Math.abs(value) / POWER_LOAD_MAX_W * 100);
+            const maxW = (kind === 'home') ? HOME_LOAD_MAX_W : POWER_LOAD_MAX_W;
+            const loadPercent = Math.min(100, Math.abs(value) / maxW * 100);
             const valueElId = (kind === 'battery') ? 'battery-top-power'
                             : (kind === 'grid')    ? 'grid-top-power'
+                            : (kind === 'home')    ? 'home-top-power'
                             : 'total-pv';
             const valueEl = document.getElementById(valueElId);
             const fillEl = document.getElementById(kind + '-load-fill');
             const textEl = document.getElementById(kind + '-load-text');
 
-            // PV is always positive (no signed value); battery + grid show +/-
+            // PV and Home are always positive (no signed value); battery + grid show +/-
             const signed = (kind === 'battery' || kind === 'grid');
             valueEl.textContent = signed ? formatSignedPower(value) : formatPower(value);
             fillEl.style.width = loadPercent.toFixed(1) + '%';
@@ -2062,6 +2010,8 @@ HTML_TEMPLATE = '''
                 valueEl.classList.toggle('importing', value < 0);
                 valueEl.classList.toggle('idle', value === 0);
                 fillEl.classList.toggle('importing', value < 0);
+            } else if (kind === 'home') {
+                valueEl.classList.toggle('idle', value === 0);
             }
         }
 
@@ -2649,53 +2599,39 @@ HTML_TEMPLATE = '''
                         .every((power) => numericPower(power) === 0);
                     document.getElementById('pv-arrays-section').classList.toggle('mppt-zero', allMpptIdle);
 
+                    // Upper-right info on the Battery card
                     document.getElementById('battery-soc').textContent = inv.battery_soc + '%';
                     document.getElementById('battery-voltage').textContent = inv.battery_voltage.toFixed(1) + 'V';
 
-                    document.getElementById('battery-power').textContent =
-                        formatSignedPower(battPower);
-                    // battery-temp removed — sensor reports a stuck value (~2°C),
-                    // not actual cell temp. Don't surface misleading data.
-
-                    document.getElementById('grid-export').textContent = formatPower(inv.power_to_grid);
-                    document.getElementById('grid-import').textContent = formatPower(inv.consumption_power);
-                    document.getElementById('grid-voltage').textContent = inv.grid_voltage.toFixed(1) + 'V';
-                    document.getElementById('grid-freq').textContent = inv.grid_frequency.toFixed(2) + 'Hz';
-
-                    document.getElementById('inverter-power').textContent = formatPower(inv.inverter_power);
+                    // Upper-right on Grid card (temperature only — frequency and
+                    // BMS amperage and inverter output power are intentionally not
+                    // surfaced anywhere; user found them noise).
                     document.getElementById('inverter-temp').textContent = inv.inverter_temperature + '°C';
+
+                    // Inverter status goes in the TOU & Mode section next to Mode
                     document.getElementById('inverter-status').textContent = inv.status;
 
-                    // BMS-reported limits
-                    if (inv.max_charge_current != null) {
-                        document.getElementById('bms-max-charge').textContent = inv.max_charge_current.toFixed(0) + ' A';
-                    }
-                    if (inv.max_discharge_current != null) {
-                        document.getElementById('bms-max-discharge').textContent = inv.max_discharge_current.toFixed(0) + ' A';
-                    }
-
-                    // Today's energy totals
-                    const fmtKWh = (v) => (v != null ? v.toFixed(1) : '--') + ' kWh';
-                    document.getElementById('energy-yield').textContent     = fmtKWh(inv.energy_today_yield);
-                    document.getElementById('energy-export').textContent    = fmtKWh(inv.energy_today_export);
-                    document.getElementById('energy-import').textContent    = fmtKWh(inv.energy_today_import);
-                    document.getElementById('energy-usage').textContent     = fmtKWh(inv.energy_today_usage);
-                    document.getElementById('energy-charge').textContent    = fmtKWh(inv.energy_today_charge);
-                    document.getElementById('energy-discharge').textContent = fmtKWh(inv.energy_today_discharge);
+                    // NEW Home card — consumption_power is whole-house load
+                    const homePower = numericPower(inv.consumption_power);
+                    updatePowerLoadCard('home', homePower);
 
                     // Daily-totals bars under each power card.
                     //   PV:      generated kWh        / expected_daily_kwh
                     //   Battery: charged + discharged / battery capacity (46 kWh)
                     //   Grid:    exported kWh         / (50% of expected daily)
+                    //   Home:    usage kWh            / (consumption budget = expected/2)
                     const yld = inv.energy_today_yield || 0;
                     const chg = inv.energy_today_charge || 0;
                     const dis = inv.energy_today_discharge || 0;
                     const exp = inv.energy_today_export || 0;
                     const imp = inv.energy_today_import || 0;
+                    const usage = inv.energy_today_usage || 0;
 
                     const expectedDaily = data.expected_daily_kwh || 0;
                     const batCap = data.total_battery_kwh || 46;
                     const exportTarget = expectedDaily * 0.5;
+                    // Daily home usage budget — our typical day is ~20 kWh.
+                    const homeBudget = 20;
 
                     const setDaily = (kind, current, target, label) => {
                         const pct = target > 0 ? Math.min(100, current / target * 100) : 0;
@@ -2708,16 +2644,13 @@ HTML_TEMPLATE = '''
                     setDaily('pv', yld, expectedDaily,
                              `${yld.toFixed(1)} kWh today`);
                     setDaily('battery', chg + dis, batCap,
-                             `${(chg+dis).toFixed(1)} kWh cycled`);
+                             `+${chg.toFixed(1)} / -${dis.toFixed(1)} kWh`);
                     document.getElementById('battery-daily-target').textContent =
                         `${batCap.toFixed(0)} kWh cap`;
                     setDaily('grid', exp, exportTarget,
                              `+${exp.toFixed(1)}${imp > 0.05 ? ' / -' + imp.toFixed(1) : ''} kWh`);
-
-                    // Color import red if non-zero
-                    const importEl = document.getElementById('energy-import');
-                    importEl.classList.toggle('bad', (inv.energy_today_import || 0) > 0.05);
-                    importEl.classList.toggle('good', (inv.energy_today_import || 0) <= 0.05);
+                    setDaily('home', usage, homeBudget,
+                             `${usage.toFixed(1)} kWh today`);
                 }
 
                 // TOU + mode panel
