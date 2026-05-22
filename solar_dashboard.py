@@ -315,6 +315,20 @@ def get_rates_for_now(now: datetime):
     ep, eo = _EXPORT_RATES.get(m, (0.10, 0.03))
     return ip, io, ep, eo
 
+
+def rates_at(ts: datetime) -> tuple[float, float]:
+    """Return (import_rate, export_rate) effective at exactly this timestamp,
+    accounting for PG&E TOU windows + Ava bonus window."""
+    h = ts.hour + ts.minute / 60.0
+    ip, io, ep, eo = get_rates_for_now(ts)
+    in_peak = PGE_PEAK_HOURS[0] <= h < PGE_PEAK_HOURS[1]
+    in_ava = AVA_BONUS_HOURS[0] <= h < AVA_BONUS_HOURS[1]
+    import_rate = ip if in_peak else io
+    export_rate = ep if in_peak else eo
+    if in_ava:
+        export_rate += AVA_BONUS_USD_PER_KWH
+    return import_rate, export_rate
+
 # =============================================================================
 # SOLAR CALCULATIONS (same as run.py)
 # =============================================================================
@@ -3491,22 +3505,30 @@ HTML_TEMPLATE = '''
 
                     // Single-line daily summary under the grid card's daily-bar:
                     //   [import kWh × import rate]   [net $]   [export kWh × export rate]
-                    // Uses currently-active rates as a flat approximation —
-                    // we don't have minute-by-minute rate × power history.
+                    // Net $ comes from the server's TOU-aware integration
+                    // (data.today_money.net), NOT (current_rate × daily_kWh) —
+                    // the rate side-numbers show the CURRENT rate just for
+                    // context, but the cumulative $ accounts for which rate
+                    // was active at each minute of the day.
                     if (sch.rates && data.inverter) {
                         const impKwh = numericPower(data.inverter.energy_today_import) || 0;
                         const expKwh = numericPower(data.inverter.energy_today_export) || 0;
                         const impRate = sch.rates.currently_active_import_rate;
                         const expRate = sch.rates.currently_active_export_rate;
-                        const net = (expKwh * expRate) - (impKwh * impRate);
                         document.getElementById('grid-daily-imported').innerHTML =
                             `<span class="kwh-num">${impKwh.toFixed(2)}</span>`
                             + `<span class="kwh-unit">kWh</span>`
-                            + `<span class="rate-mult">× ${(impRate*100).toFixed(1)}¢</span>`;
+                            + `<span class="rate-mult">× ${(impRate*100).toFixed(1)}¢ now</span>`;
                         document.getElementById('grid-daily-exported').innerHTML =
                             `<span class="kwh-num">${expKwh.toFixed(1)}</span>`
                             + `<span class="kwh-unit">kWh</span>`
-                            + `<span class="rate-mult">× ${(expRate*100).toFixed(1)}¢</span>`;
+                            + `<span class="rate-mult">× ${(expRate*100).toFixed(1)}¢ now</span>`;
+                        // TOU-aware net (server-computed). Fall back to the
+                        // current-rate approximation if not yet loaded.
+                        const tm = data.today_money;
+                        const net = (tm && typeof tm.net === 'number')
+                            ? tm.net
+                            : (expKwh * expRate) - (impKwh * impRate);
                         const netEl = document.getElementById('grid-money-net');
                         const sign = net >= 0 ? '+' : '−';
                         netEl.textContent = `${sign}$${Math.abs(net).toFixed(2)}`;
@@ -3847,8 +3869,89 @@ def get_data():
         "dni": dni,
         "inverter": inverter_data,
         "schedule": schedule,
+        # TOU-aware day-to-date earnings (integrates pToGrid × export-rate
+        # − pToUser × import-rate at each 4-min sample using the rate
+        # window in effect at that sample's timestamp).
+        "today_money": _today_money_sync(),
         "read_only": True,
     })
+
+
+# 60-second cache for the TOU-aware daily-earnings integration.
+_TODAY_MONEY_CACHE: dict = {"date": None, "ts": None, "data": None}
+
+
+async def _compute_today_money_so_far():
+    """Integrate today's pToGrid × export-rate − pToUser × import-rate
+    using the TOU window in effect at each 4-min chart-data sample.
+
+    Returns {"income", "cost", "net"} in dollars. This is what the user
+    sees as "+$X.XX today" under the grid card. Replaces the previous
+    naive `(daily_export_kWh × current_rate)` calculation which over-
+    estimated when the current rate was high (e.g. Ava bonus window)
+    because most of the day's exports happened at the lower off-peak
+    rate.
+    """
+    today = datetime.now(TIMEZONE).date()
+    inverter = _inverter_cache.get("inverter")
+    client   = _inverter_cache.get("client")
+    if not inverter or not client:
+        return {"income": 0.0, "cost": 0.0, "net": 0.0}
+    serial = inverter.serial_number
+    try:
+        pgrid_r, puser_r = await asyncio.gather(
+            client.analytics.get_chart_data(serial, "pToGrid", today.isoformat()),
+            client.analytics.get_chart_data(serial, "pToUser", today.isoformat()),
+        )
+    except Exception as e:
+        print(f"today_money fetch error: {e}", flush=True)
+        return {"income": 0.0, "cost": 0.0, "net": 0.0}
+
+    income = 0.0
+    cost   = 0.0
+    SAMPLE_HOURS = 4.0 / 60.0   # 4-min chart-data interval
+    for s in (pgrid_r.get("data") or []):
+        t = s.get("time"); v = s.get("value") or 0
+        if not t or v <= 0: continue
+        try:
+            ts = datetime.strptime(t, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TIMEZONE)
+        except ValueError:
+            continue
+        _, exp_rate = rates_at(ts)
+        income += (v / 1000.0) * SAMPLE_HOURS * exp_rate
+    for s in (puser_r.get("data") or []):
+        t = s.get("time"); v = s.get("value") or 0
+        if not t or v <= 0: continue
+        try:
+            ts = datetime.strptime(t, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TIMEZONE)
+        except ValueError:
+            continue
+        imp_rate, _ = rates_at(ts)
+        cost += (v / 1000.0) * SAMPLE_HOURS * imp_rate
+    return {"income": round(income, 3),
+            "cost":   round(cost, 3),
+            "net":    round(income - cost, 3)}
+
+
+def _today_money_sync():
+    cache = _TODAY_MONEY_CACHE
+    today_iso = datetime.now(TIMEZONE).date().isoformat()
+    if (cache["date"] == today_iso and cache["ts"]
+            and (datetime.now() - cache["ts"]).total_seconds() < 60):
+        return cache["data"]
+    with _LOOP_LOCK:
+        loop = _inverter_cache.get("loop")
+        if loop is None or loop.is_closed():
+            return cache.get("data") or {"income": 0.0, "cost": 0.0, "net": 0.0}
+        try:
+            data = loop.run_until_complete(_compute_today_money_so_far())
+        except Exception as e:
+            print(f"today_money sync error: {e}", flush=True)
+            data = cache.get("data") or {"income": 0.0, "cost": 0.0, "net": 0.0}
+    cache["date"] = today_iso
+    cache["ts"] = datetime.now()
+    cache["data"] = data
+    return data
 
 
 # Cache today's cumulative expected-kWh curve (one entry per 30-min slot,
