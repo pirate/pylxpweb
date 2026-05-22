@@ -185,10 +185,11 @@ PGE_PARTIAL_PEAK_HOURS_EVE = (21, 24)  # 9 PM – midnight partial peak
 AVA_BONUS_HOURS = (15, 20)       # 3 – 8 PM Ava peak-export bonus
 
 FORCED_DISCHARGE_WINDOW = (16, 21)  # current schedule on inverter (16:00-20:59)
-FORCED_DISCHARGE_SOC_FLOOR = 40     # %
+FORCED_DISCHARGE_SOC_FLOOR = 70     # % (HOLD_FORCED_DISCHG_SOC_LIMIT)
+FORCED_DISCHARGE_POWER_KW  = 8      # kW (HOLD_FORCED_DISCHG_POWER_CMD)
 SYSTEM_CHARGE_SOC_LIMIT = 95        # %
-DISCHARGE_CUTOFF_SOC = 8            # %
-FEED_IN_GRID_POWER_KW = 12          # kW max export
+DISCHARGE_CUTOFF_SOC = 5            # % (HOLD_DISCHG_CUT_OFF_SOC_EOD)
+FEED_IN_GRID_POWER_KW = 8           # kW max export (HOLD_FEED_IN_GRID_POWER_PERCENT)
 
 # PG&E E-TOU-C rate estimates for IMPORT $/kWh (seasonal — summer/winter)
 # E-TOU-C summer (Jun-Sep): higher rates. Winter (Oct-May): lower.
@@ -501,11 +502,88 @@ def compute_schedule_status(now: datetime, inverter_data: dict | None) -> dict:
         "config": {
             "forced_discharge_window": list(FORCED_DISCHARGE_WINDOW),
             "forced_discharge_soc_floor": FORCED_DISCHARGE_SOC_FLOOR,
+            "forced_discharge_power_kw": FORCED_DISCHARGE_POWER_KW,
             "system_charge_soc_limit": SYSTEM_CHARGE_SOC_LIMIT,
             "discharge_cutoff_soc": DISCHARGE_CUTOFF_SOC,
             "feed_in_power_kw": FEED_IN_GRID_POWER_KW,
         },
+        "timeline": _build_schedule_timeline(now),
     }
+
+
+def _build_schedule_timeline(now: datetime) -> list[dict]:
+    """Build a chronological list of schedule events covering ~next 24h.
+
+    Currently the only ACTIVE scheduled window is Forced Discharge (peak
+    export). Everything else (forced charge, AC charge, BAT_FIRST slots,
+    peak shaving) is either disabled or has no time window. So the
+    timeline alternates between "Forced Discharge" and "self-consumption"
+    (the default fallback when no schedule is running).
+
+    Returns a list of dicts:
+      {start_h, end_h, label, detail, kind, active}
+    where kind ∈ {"idle", "forced_discharge"} for CSS color matching.
+    """
+    from datetime import timedelta as _td
+    h_now = now.hour + now.minute / 60.0
+    fd_start, fd_end = FORCED_DISCHARGE_WINDOW
+
+    # Generate the next ~2 days of forced-discharge boundaries so we can
+    # always show 24h of upcoming events from "now".
+    fd_windows = []
+    for day_offset in (0, 1):
+        fd_windows.append((fd_start + 24 * day_offset, fd_end + 24 * day_offset))
+
+    # Stitch into a flat list of (start, end, kind) covering h_now → h_now+24
+    events = []
+    cursor = h_now
+    horizon = h_now + 24
+    for start, end in fd_windows:
+        if end <= cursor:
+            continue
+        # Idle/self-consumption from cursor up to next FD start
+        if cursor < start:
+            events.append({"start_h": cursor, "end_h": min(start, horizon), "kind": "idle"})
+        if start < horizon:
+            events.append({
+                "start_h": max(start, cursor),
+                "end_h": min(end, horizon),
+                "kind": "forced_discharge",
+            })
+        cursor = end
+        if cursor >= horizon:
+            break
+    if cursor < horizon:
+        events.append({"start_h": cursor, "end_h": horizon, "kind": "idle"})
+
+    fd_detail = (f"{FORCED_DISCHARGE_POWER_KW} kW target · ≥{FORCED_DISCHARGE_SOC_FLOOR}% "
+                 f"SOC floor")
+
+    def _fmt(h):
+        # Wrap around (h could be > 23.999 for next-day events)
+        h_mod = h % 24
+        hh = int(h_mod)
+        mm = int(round((h_mod - hh) * 60))
+        if mm == 60:
+            hh = (hh + 1) % 24
+            mm = 0
+        suffix = "p" if hh >= 12 else "a"
+        h12 = hh % 12 or 12
+        return f"{h12}:{mm:02d}{suffix}" if mm else f"{h12}{suffix}"
+
+    out = []
+    for e in events:
+        kind = e["kind"]
+        is_active = e["start_h"] <= h_now < e["end_h"]
+        out.append({
+            "start": _fmt(e["start_h"]),
+            "end":   _fmt(e["end_h"]),
+            "label": "Forced Discharge" if kind == "forced_discharge" else "self-consumption",
+            "detail": fd_detail if kind == "forced_discharge" else "PV → load → battery (95% cap)",
+            "kind":   kind,
+            "active": is_active,
+        })
+    return out
 
 
 async def fetch_inverter_data():
@@ -1077,6 +1155,38 @@ HTML_TEMPLATE = '''
             height: 280px;
             margin-top: 4px;
         }
+        /* Schedule timeline — one row per scheduled window, in time order.
+           The active row is highlighted via background tint + the time
+           range gets a small "NOW" badge in front. */
+        #schedule-timeline { margin-top: 4px; }
+        .sched-row {
+            display: grid;
+            grid-template-columns: 110px 1fr;
+            gap: 8px;
+            padding: 4px 6px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-variant-numeric: tabular-nums;
+            line-height: 1.3;
+        }
+        .sched-row + .sched-row { margin-top: 2px; }
+        .sched-row .sched-range { color: #aaa; white-space: nowrap; }
+        .sched-row .sched-body  { color: #ddd; }
+        .sched-row .sched-detail { color: #888; font-size: 0.85em; margin-left: 4px; }
+        .sched-row.sched-forced_discharge .sched-body { color: #f39c12; font-weight: 600; }
+        .sched-row.sched-idle .sched-body            { color: #95a5a6; }
+        .sched-row.sched-active {
+            background: rgba(255,255,255,0.08);
+            border-left: 3px solid #f1c40f;
+            padding-left: 8px;
+        }
+        .sched-row.sched-active .sched-range::before {
+            content: 'NOW ';
+            color: #f1c40f;
+            font-weight: 700;
+            margin-right: 2px;
+        }
+        .sched-row.sched-empty { color: #888; text-align: center; padding: 8px; }
         /* Combined import/export rate display: "$0.380 ⬅  ➡ $0.025" */
         .nem-rates {
             display: inline-flex;
@@ -1484,13 +1594,8 @@ HTML_TEMPLATE = '''
                         <span class="good" id="inverter-status">--</span>
                     </span>
                 </div>
-                <div class="stat-row">
-                    <span class="stat-label">Forced Discharge</span>
-                    <span class="stat-value" id="forced-discharge-status">--</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Schedule</span>
-                    <span class="stat-value" id="schedule-window">16:00 – 21:00</span>
+                <div id="schedule-timeline">
+                    <div class="sched-row sched-empty">Loading schedule…</div>
                 </div>
             </div>
 
@@ -2350,6 +2455,26 @@ HTML_TEMPLATE = '''
             setBorder('home-card', homeColor);
         }
 
+        // Render the schedule timeline. Receives a list of events from
+        // sch.timeline (see _build_schedule_timeline server-side); each has
+        // {start, end, label, detail, kind, active}. One row per event,
+        // current row highlighted with a yellow left-border + "NOW" badge.
+        function renderScheduleTimeline(events) {
+            const container = document.getElementById('schedule-timeline');
+            if (!container || !Array.isArray(events) || events.length === 0) return;
+            const rows = events.map(e => {
+                const cls = `sched-row sched-${e.kind}${e.active ? ' sched-active' : ''}`;
+                // Compact "4p–9p" range or "now → 4p" for the active event
+                const range = e.active ? `→ ${e.end}` : `${e.start}–${e.end}`;
+                return `
+                    <div class="${cls}">
+                        <span class="sched-range">${range}</span>
+                        <span class="sched-body">${e.label}<span class="sched-detail">${e.detail}</span></span>
+                    </div>`;
+            }).join('');
+            container.innerHTML = rows;
+        }
+
         function createGridService() {
             // SERVICE DROP ON SOUTHERN CORNER
             // Calculate positions relative to house from config
@@ -3049,13 +3174,9 @@ HTML_TEMPLATE = '''
                     else if (sch.in_partial_peak) touText = '🟡 partial peak';
                     document.getElementById('tou-period').textContent = touText;
 
-                    document.getElementById('forced-discharge-status').textContent =
-                        sch.in_forced_discharge_window ? '🔋→⚡ ACTIVE' : 'idle';
-
-                    if (sch.config) {
-                        const w = sch.config.forced_discharge_window;
-                        document.getElementById('schedule-window').textContent =
-                            formatHourRange12(w[0], w[1]);
+                    // Render the next-24h timeline if the server provided one
+                    if (sch.timeline) {
+                        renderScheduleTimeline(sch.timeline);
                     }
 
                     if (sch.rates) {
