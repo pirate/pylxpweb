@@ -761,8 +761,37 @@ HTML_TEMPLATE = '''
         .stat-value.good { color: #2ecc71; }
         .stat-value.warning { color: #f39c12; }
         .stat-value.bad { color: #e74c3c; }
-        .mppt-detail { padding: 2px 0 8px 0; }
-        .mppt-detail .stat-value { font-size: 0.85em; opacity: 0.8; }
+        /* Single-line MPPT row: name on left, V/A in middle, W on right. */
+        .mppt-line {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 8px;
+            padding: 4px 0 2px;
+            font-size: 0.95em;
+        }
+        .mppt-line .mppt-name {
+            color: #aaa;
+            white-space: nowrap;
+        }
+        .mppt-line .mppt-voltage-text {
+            flex: 1;
+            text-align: center;
+            color: #3498db;
+            font-size: 0.85em;
+            font-variant-numeric: tabular-nums;
+            opacity: 0.85;
+            white-space: nowrap;
+        }
+        .mppt-line .mppt-voltage-text.good { color: #2ecc71; }
+        .mppt-line .mppt-voltage-text.warning { color: #f39c12; }
+        .mppt-line .mppt-voltage-text.bad { color: #e74c3c; }
+        .mppt-line .mppt-power-text {
+            color: #f39c12;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
         .power-summary {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -806,6 +835,19 @@ HTML_TEMPLATE = '''
             text-transform: uppercase;
             letter-spacing: 0.06em;
         }
+        .power-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 6px;
+        }
+        .sun-times {
+            color: #aaa;
+            font-size: 0.62em;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+        }
         .power-card .value {
             margin-top: 6px;
             font-size: 2.1em;
@@ -843,17 +885,6 @@ HTML_TEMPLATE = '''
         }
         .power-card-summary .pos { color: #2ecc71; }
         .power-card-summary .neg { color: #e74c3c; }
-        .sun-row {
-            display: flex;
-            justify-content: center;
-            gap: 14px;
-            margin: -4px 0 14px 0;
-            font-size: 0.85em;
-            color: #aaa;
-            font-variant-numeric: tabular-nums;
-        }
-        .sun-row-label { font-size: 1.1em; }
-        .sun-row-time { letter-spacing: 0.02em; }
         .event-row {
             display: flex;
             gap: 10px;
@@ -946,13 +977,6 @@ HTML_TEMPLATE = '''
             padding: 2px 0 4px;
         }
         .mppt-zero .mppt-zero-message { display: block; }
-        .sun-info {
-            display: flex;
-            justify-content: space-around;
-            text-align: center;
-        }
-        .sun-info .time-block .label { font-size: 0.75em; color: #888; }
-        .sun-info .time-block .time { font-size: 1.2em; font-weight: 600; }
         .last-update {
             text-align: center;
             color: #666;
@@ -1211,7 +1235,13 @@ HTML_TEMPLATE = '''
         <div id="stats-panel">
             <div class="section power-summary">
                 <div class="power-card">
-                    <div class="label">PV Power</div>
+                    <div class="power-card-header">
+                        <div class="label">PV Power</div>
+                        <div class="sun-times">
+                            ↑<span id="sunrise">--:--</span>
+                            &nbsp;↓<span id="sunset">--:--</span>
+                        </div>
+                    </div>
                     <div class="value pv" id="total-pv">--</div>
                     <div class="performance-bar">
                         <div class="fill" id="pv-load-fill" style="width: 0%"></div>
@@ -1266,60 +1296,37 @@ HTML_TEMPLATE = '''
                 </div>
             </div>
 
-            <!-- Hidden — these change but are only useful for the 3D animation,
-                 not as readable stats. Kept in DOM so updateSunPosition / data
-                 fetch code doesn't have to special-case them. -->
-            <span id="sun-altitude" style="display:none">--°</span>
-            <span id="sun-azimuth" style="display:none">--°</span>
-
-            <div class="sun-row">
-                <span class="sun-row-label">☀</span>
-                <span class="sun-row-time">↑ <span id="sunrise">--:--</span></span>
-                <span class="sun-row-time">↓ <span id="sunset">--:--</span></span>
-            </div>
-
             <!-- Two-column row: import events on the left, PV arrays on the right -->
             <div class="two-col-row">
 
             <div class="section">
-                <div class="section-title"><span class="icon">⚠️</span> Import Events (last 24h)</div>
                 <div id="import-events-list">
                     <div class="event-empty">No imports in the last 24h ✓</div>
                 </div>
             </div>
 
             <div class="section" id="pv-arrays-section">
-                <div class="section-title"><span class="icon">⚡</span> PV Arrays</div>
                 <div class="mppt-zero-message">All MPPT inputs idle (0 W)</div>
-                <div class="stat-row mppt-row">
-                    <span class="stat-label"><span class="mppt-dot sw"></span> MPPT 1 (SW)</span>
-                    <span class="stat-value power" id="pv1">-- W</span>
-                </div>
-                <div class="stat-row mppt-row mppt-detail">
-                    <span class="stat-label"></span>
-                    <span class="stat-value voltage" id="pv1-detail">-- V / -- A</span>
+                <div class="mppt-line mppt-row">
+                    <span class="mppt-name"><span class="mppt-dot sw"></span> MPPT 1 (SW)</span>
+                    <span class="mppt-voltage-text" id="pv1-detail">-- V / -- A</span>
+                    <span class="mppt-power-text" id="pv1">-- W</span>
                 </div>
                 <div class="mppt-row mppt-voltage-bar-row">
                     <div class="mppt-voltage-bar"><div class="fill" id="pv1-voltage-fill"></div></div>
                 </div>
-                <div class="stat-row mppt-row">
-                    <span class="stat-label"><span class="mppt-dot ne"></span> MPPT 2 (NE)</span>
-                    <span class="stat-value power" id="pv2">-- W</span>
-                </div>
-                <div class="stat-row mppt-row mppt-detail">
-                    <span class="stat-label"></span>
-                    <span class="stat-value voltage" id="pv2-detail">-- V / -- A</span>
+                <div class="mppt-line mppt-row">
+                    <span class="mppt-name"><span class="mppt-dot ne"></span> MPPT 2 (NE)</span>
+                    <span class="mppt-voltage-text" id="pv2-detail">-- V / -- A</span>
+                    <span class="mppt-power-text" id="pv2">-- W</span>
                 </div>
                 <div class="mppt-row mppt-voltage-bar-row">
                     <div class="mppt-voltage-bar"><div class="fill" id="pv2-voltage-fill"></div></div>
                 </div>
-                <div class="stat-row mppt-row">
-                    <span class="stat-label"><span class="mppt-dot yard"></span> MPPT 3 (Mixed)</span>
-                    <span class="stat-value power" id="pv3">-- W</span>
-                </div>
-                <div class="stat-row mppt-row mppt-detail">
-                    <span class="stat-label"></span>
-                    <span class="stat-value voltage" id="pv3-detail">-- V / -- A</span>
+                <div class="mppt-line mppt-row">
+                    <span class="mppt-name"><span class="mppt-dot yard"></span> MPPT 3 (Mixed)</span>
+                    <span class="mppt-voltage-text" id="pv3-detail">-- V / -- A</span>
+                    <span class="mppt-power-text" id="pv3">-- W</span>
                 </div>
                 <div class="mppt-row mppt-voltage-bar-row">
                     <div class="mppt-voltage-bar"><div class="fill" id="pv3-voltage-fill"></div></div>
@@ -2610,8 +2617,6 @@ HTML_TEMPLATE = '''
                 // Update sun position
                 if (data.sun) {
                     updateSunPosition(data.sun.altitude, data.sun.azimuth);
-                    document.getElementById('sun-altitude').textContent = data.sun.altitude.toFixed(1) + '°';
-                    document.getElementById('sun-azimuth').textContent = data.sun.azimuth.toFixed(1) + '°';
                     document.getElementById('sunrise').textContent = formatTime(data.sun.sunrise_hour);
                     document.getElementById('sunset').textContent = formatTime(data.sun.sunset_hour);
                 }
@@ -2640,9 +2645,9 @@ HTML_TEMPLATE = '''
                         const a = v > 0 ? (w / v).toFixed(1) : '0.0';
                         let cls = 'good';
                         let warn = '';
-                        if (v > 0 && v < 140) { cls = 'bad'; warn = ' ⚠ below turn-on'; }
-                        else if (v > 0 && v < MPPT_OPT_MIN) { cls = 'warning'; warn = ` ⚠ below optimal (300V)`; }
-                        else if (v > MPPT_OPT_MAX) { cls = 'bad'; warn = ' ⚠ above max'; }
+                        if (v > 0 && v < 140) { cls = 'bad'; }
+                        else if (v > 0 && v < MPPT_OPT_MIN) { cls = 'warning'; }
+                        else if (v > MPPT_OPT_MAX) { cls = 'bad'; }
                         return { text: `${v.toFixed(0)}V / ${a}A${warn}`, cls };
                     };
                     const setMpptDetail = (id, v, w) => {
