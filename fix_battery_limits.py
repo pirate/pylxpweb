@@ -71,10 +71,12 @@ EXPECTED = {
     "HOLD_AC_CHARGE_SOC_LIMIT":                "100",  # max SOC AC charging will fill to
 
     # === Mode flags ===
-    # User disabled self-consumption on 2026-05-22 — relies on the BAT_FIRST
-    # schedule + forced-discharge schedule alone rather than the CT-driven
-    # auto-priority logic. Reduces chasing-the-zero behavior around the CT
-    # deadband.
+    # 2026-05-22: tried re-enabling but the EG4 firmware has a coupling where
+    # turning self-consumption ON forces FUNC_FEED_IN_GRID_EN OFF (i.e. no
+    # export at all). Restoring the export flags subsequently flipped this
+    # back to False. Net: live state is False; investigate the coupling
+    # before trying again. Until then we follow BAT_FIRST + forced-charge
+    # schedules only, with PV → grid the default.
     "FUNC_LSP_SELF_CONSUMPTION_EN":            False,
     "FUNC_LSP_CHARGE_PRIORITY_EN":             True,   # NB: keeps flipping back to True; live with it
     "FUNC_LSP_BATT_VOLT_OR_SOC":               False,  # SOC-based control (BMS reports SOC)

@@ -1768,6 +1768,13 @@ HTML_TEMPLATE = '''
         }
 
         let historyChart;
+        // One-time Chart.js global defaults so axis ticks, legend, tooltip
+        // all share the same font + color (avoids the fuzzy serif fallback).
+        if (typeof Chart !== 'undefined') {
+            Chart.defaults.font.family = "-apple-system, system-ui, 'Segoe UI', Roboto, sans-serif";
+            Chart.defaults.font.size = 12;
+            Chart.defaults.color = '#ddd';
+        }
         async function fetchHistory() {
             try {
                 const r = await fetch('/api/history');
@@ -1801,18 +1808,63 @@ HTML_TEMPLATE = '''
                 d.spanGaps = true;
             });
 
+            // Custom plugin: shade the forced-discharge window (16:00-21:00
+            // each day) with a subtle red-orange band so you can see when
+            // the peak-export schedule is supposed to be active.
+            const forcedDischargeShade = {
+                id: 'forcedDischargeShade',
+                beforeDatasetsDraw(chart) {
+                    if (!samples.length) return;
+                    const xScale = chart.scales.x;
+                    const yScale = chart.scales.kw;
+                    if (!xScale || !yScale) return;
+                    const ctx = chart.ctx;
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(231,76,60,0.10)';
+                    // Cover yesterday + today's 16:00-21:00 windows
+                    const ts0 = new Date(samples[0].t.replace(' ', 'T'));
+                    const tsN = new Date(samples[samples.length-1].t.replace(' ', 'T'));
+                    const days = [];
+                    const cur = new Date(ts0);
+                    cur.setHours(0,0,0,0);
+                    while (cur <= tsN) {
+                        days.push(new Date(cur));
+                        cur.setDate(cur.getDate() + 1);
+                    }
+                    for (const day of days) {
+                        const start = new Date(day); start.setHours(16, 0, 0, 0);
+                        const end   = new Date(day); end.setHours(21, 0, 0, 0);
+                        if (end < ts0 || start > tsN) continue;
+                        const xs = xScale.getPixelForValue(start);
+                        const xe = xScale.getPixelForValue(end);
+                        ctx.fillRect(xs, yScale.top, xe - xs, yScale.bottom - yScale.top);
+                    }
+                    ctx.restore();
+                },
+            };
+
+            // High-DPI rendering — fixes the fuzzy/aliased text on retina
+            // and HASS-kiosk displays. Chart.js defaults to 1.0 in some
+            // environments (luakit, especially) so set it explicitly.
+            const dpr = Math.max(window.devicePixelRatio || 1, 2);
+
             const cfg = {
                 type: 'line',
                 data: { labels, datasets },
+                plugins: [forcedDischargeShade],
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    devicePixelRatio: dpr,
                     animation: false,
                     interaction: { mode: 'index', intersect: false },
+                    font: {
+                        family: "-apple-system, system-ui, 'Segoe UI', sans-serif",
+                    },
                     plugins: {
                         legend: {
                             position: 'top',
-                            labels: { color: '#ddd', font: { size: 11 }, boxWidth: 12, padding: 8 },
+                            labels: { color: '#ddd', font: { size: 12 }, boxWidth: 12, padding: 8 },
                         },
                         tooltip: {
                             backgroundColor: 'rgba(20,20,28,0.95)',
@@ -1825,8 +1877,9 @@ HTML_TEMPLATE = '''
                             type: 'time',
                             time: {
                                 unit: 'hour',
-                                displayFormats: { hour: 'HH:mm' },
-                                tooltipFormat: 'MMM d, HH:mm',
+                                // 12-hour compact tick format: "1p", "9a"
+                                displayFormats: { hour: 'ha' },
+                                tooltipFormat: 'MMM d, h:mma',
                             },
                             ticks: { color: '#888', maxRotation: 0 },
                             grid:  { color: 'rgba(255,255,255,0.05)' },
@@ -2913,7 +2966,7 @@ HTML_TEMPLATE = '''
                     if (sch.config) {
                         const w = sch.config.forced_discharge_window;
                         document.getElementById('schedule-window').textContent =
-                            String(w[0]).padStart(2,'0') + ':00 – ' + String(w[1]).padStart(2,'0') + ':00';
+                            formatHourRange12(w[0], w[1]);
                     }
 
                     if (sch.rates) {
@@ -2996,7 +3049,24 @@ HTML_TEMPLATE = '''
             if (hour === null || hour === undefined) return '--:--';
             const h = Math.floor(hour);
             const m = Math.floor((hour - h) * 60);
-            return h.toString().padStart(2, '0') + ':' + m.toString().padStart(2, '0');
+            return formatHM12(h, m);
+        }
+        // 12-hour compact format: "1:15p", "9:31a", "12:00p", "12:00a"
+        function formatHM12(h, m) {
+            const suffix = h >= 12 ? 'p' : 'a';
+            let h12 = h % 12;
+            if (h12 === 0) h12 = 12;
+            return h12 + ':' + String(m).padStart(2, '0') + suffix;
+        }
+        // Format "HH:00 – HH:00" pair as "Ha – Hp" (no minutes since schedule is hourly).
+        function formatHourRange12(h0, h1) {
+            const fmt = (h) => {
+                const suffix = h >= 12 ? 'p' : 'a';
+                let h12 = h % 12;
+                if (h12 === 0) h12 = 12;
+                return h12 + suffix;
+            };
+            return fmt(h0) + ' – ' + fmt(h1);
         }
 
         // =====================================================================
@@ -3289,6 +3359,15 @@ def _expected_daily_kwh_for(date):
 _EVENTS_CACHE = {"date": None, "ts": None, "events": []}
 
 
+def _fmt_12h(ts):
+    """Format a datetime as compact 12-hour time, e.g. '1:15p', '9:31a'."""
+    h = ts.hour
+    m = ts.minute
+    suffix = "p" if h >= 12 else "a"
+    h12 = h % 12 or 12
+    return f"{h12}:{m:02d}{suffix}"
+
+
 async def _fetch_recent_import_events():
     """Pull per-4-min pToUser/SOC/ppv chart samples for the last 24h
     (today + yesterday's tail) and classify each contiguous import event."""
@@ -3390,12 +3469,13 @@ async def _fetch_recent_import_events():
             soc=soc_at,
             ppv=ppv_at,
         )
-        # Show date in time field if event is from yesterday
+        # 12-hour compact format: "1:15p", "9:31a". Prepend weekday abbrev
+        # if the event is from yesterday so the row reads clearly.
         date_prefix = "" if ts_start.date() == datetime.now(TIMEZONE).date() \
                         else ts_start.strftime("%a ")
         out.append({
-            "start": date_prefix + ts_start.strftime("%H:%M"),
-            "end":   date_prefix + ts_end.strftime("%H:%M"),
+            "start": date_prefix + _fmt_12h(ts_start),
+            "end":   date_prefix + _fmt_12h(ts_end),
             "duration_min": round(dur_min, 1),
             "peak_w": int(peak_w),
             "kwh": round(kwh, 3),
@@ -3494,9 +3574,15 @@ async def _fetch_24h_history():
         return {"samples": []}
     serial = inverter.serial_number
 
-    # Fields we want for each day. pToGrid + pToUser are signed by direction
-    # (each is non-negative; sign comes from which field is non-zero).
-    fields = ["ppv", "pCharge", "pDischarge", "pToUser", "pToGrid", "soc"]
+    # Fields we want for each day. Notes on field-name oddities discovered
+    # the hard way:
+    #   - "ppv" (aggregate) returns empty — must sum ppv1+ppv2+ppv3 instead.
+    #   - "pDisCharge" needs capital C, but lowercase also works.
+    #   - There's no direct pLoad/home-consumption field; we reconstruct it
+    #     from pInv + pToUser - pToGrid (matches consumption_power exactly).
+    fields = ["ppv1", "ppv2", "ppv3",
+              "pCharge", "pDisCharge",
+              "pToUser", "pToGrid", "pInv", "soc"]
     tasks = []
     for d in (yesterday, today):
         for f in fields:
@@ -3529,17 +3615,19 @@ async def _fetch_24h_history():
     out_samples = []
     for t in sorted(timeline.keys()):
         v = timeline[t]
-        pv      = float(v.get("ppv", 0))            # W (Luxpower returns W for ppv)
+        pv = (float(v.get("ppv1", 0)) + float(v.get("ppv2", 0))
+              + float(v.get("ppv3", 0)))            # W (sum the 3 MPPTs)
         charge  = float(v.get("pCharge", 0))         # W
-        discharge = float(v.get("pDischarge", 0))    # W
+        discharge = float(v.get("pDisCharge", 0))    # W  (NB: capital C — pDisCharge)
         to_user = float(v.get("pToUser", 0))         # W — grid import
         to_grid = float(v.get("pToGrid", 0))         # W — grid export
+        pinv    = float(v.get("pInv", 0))            # W — inverter net AC output
         soc     = float(v.get("soc", 0))             # %
 
-        # Home consumption is not directly in chart data; reconstruct from
-        # energy balance: load = pv + discharge - charge + to_user - to_grid.
-        # (Same as the runtime "consumption_power" field.)
-        home = max(0.0, pv + discharge - charge + to_user - to_grid)
+        # Home consumption reconstructed from the inverter's AC interface:
+        #   home = inverter_output + grid_in - grid_out
+        # Verified against the live "consumption_power" field; matches exactly.
+        home = max(0.0, pinv + to_user - to_grid)
 
         out_samples.append({
             "t": t,
