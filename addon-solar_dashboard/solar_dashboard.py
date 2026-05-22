@@ -1093,8 +1093,11 @@ HTML_TEMPLATE = '''
         /* Sun + peak + moon icons next to sunrise / solar-noon / sunset.
            Unicode glyphs render as text so we can colorize them via CSS. */
         .sun-times .sun-icon  { color: #f1c40f; font-size: 1.15em; }
-        .sun-times .peak-icon { color: #e67e22; font-size: 1.05em; }
+        .sun-times .peak-icon { color: #e67e22; font-size: 0.85em; margin-right: 1px; }
         .sun-times .moon-icon { color: #5d6d9c; font-size: 1.15em; }
+        /* Peak group needs visible margin on both sides so it doesn't
+           crowd sunrise/sunset times. */
+        .sun-times .peak-group { margin: 0 8px; }
         /* Battery upper-right SOC · V · A — all three bold for legibility */
         .card-meta-tag.battery-tag {
             font-weight: 700;
@@ -1701,8 +1704,8 @@ HTML_TEMPLATE = '''
                         <div class="label">PV Power</div>
                         <div class="sun-times">
                             <span class="sun-icon">☀</span><span id="sunrise">--:--</span>
-                            &nbsp;<span class="peak-icon" title="Solar noon (peak output)">⛰</span><span id="solar-peak">--:--</span>
-                            &nbsp;<span class="moon-icon">☾</span><span id="sunset">--:--</span>
+                            <span class="peak-group" title="Solar noon (peak output)"><span class="peak-icon">▲</span><span id="solar-peak">--:--</span></span>
+                            <span class="moon-icon">☾</span><span id="sunset">--:--</span>
                         </div>
                     </div>
                     <div class="value pv" id="total-pv">--</div>
