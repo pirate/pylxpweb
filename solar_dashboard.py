@@ -547,76 +547,65 @@ def compute_schedule_status(now: datetime, inverter_data: dict | None) -> dict:
 
 
 def _build_schedule_timeline(now: datetime) -> list[dict]:
-    """Build a chronological list of schedule events covering ~next 24h.
+    """Build today's schedule from "now" through end-of-day (no tomorrow).
 
-    Currently the only ACTIVE scheduled window is Forced Discharge (peak
-    export). Outside of that window the inverter runs in whatever mode
-    its top-level mode flags select — for our system that's "PV Charge
-    Priority" (FUNC_LSP_CHARGE_PRIORITY_EN=True,
-    FUNC_LSP_SELF_CONSUMPTION_EN=False).
+    The day breaks into 4 logical phases that map to the PG&E TOU
+    structure + the forced-discharge window:
 
-    Returns a list of dicts:
-      {start_h, end_h, label, detail, kind, active}
-    where kind ∈ {"idle", "forced_discharge"} for CSS color matching.
+      00:00 – 15:00  PV Charge Priority    (off-peak;   PV fills battery to 95%)
+      15:00 – 16:00  self-consumption      (partial peak; hold battery for peak)
+      16:00 – 21:00  Forced Discharge      (peak;       8 kW target, ≥70% floor)
+      21:00 – 24:00  self-consumption      (partial peak;  battery balances load)
+
+    Past phases are skipped. The first remaining phase is clipped to start
+    at "now" so the active row shows the time-until-next-transition. The
+    list stops at midnight — tomorrow's slots are NOT included.
+
+    Returns a list of dicts: {start, end, label, detail, kind, active}.
     """
-    from datetime import timedelta as _td
     h_now = now.hour + now.minute / 60.0
     fd_start, fd_end = FORCED_DISCHARGE_WINDOW
-
-    # Generate the next ~2 days of forced-discharge boundaries so we can
-    # always show 24h of upcoming events from "now".
-    fd_windows = []
-    for day_offset in (0, 1):
-        fd_windows.append((fd_start + 24 * day_offset, fd_end + 24 * day_offset))
-
-    # Stitch into a flat list of (start, end, kind) covering h_now → h_now+24
-    events = []
-    cursor = h_now
-    horizon = h_now + 24
-    for start, end in fd_windows:
-        if end <= cursor:
-            continue
-        # Idle/self-consumption from cursor up to next FD start
-        if cursor < start:
-            events.append({"start_h": cursor, "end_h": min(start, horizon), "kind": "idle"})
-        if start < horizon:
-            events.append({
-                "start_h": max(start, cursor),
-                "end_h": min(end, horizon),
-                "kind": "forced_discharge",
-            })
-        cursor = end
-        if cursor >= horizon:
-            break
-    if cursor < horizon:
-        events.append({"start_h": cursor, "end_h": horizon, "kind": "idle"})
+    pp_aft_start, pp_aft_end = PGE_PARTIAL_PEAK_HOURS_AFT
+    pp_eve_start, pp_eve_end = PGE_PARTIAL_PEAK_HOURS_EVE
 
     fd_detail = (f"{FORCED_DISCHARGE_POWER_KW} kW target · ≥{FORCED_DISCHARGE_SOC_FLOOR}% "
                  f"SOC floor")
-    idle_label  = "PV Charge Priority"
-    idle_detail = f"PV → battery (charge to {SYSTEM_CHARGE_SOC_LIMIT}%) → grid"
+
+    phases = [
+        (0,            pp_aft_start, "PV Charge Priority", "pv_charge",
+         f"PV → battery ({SYSTEM_CHARGE_SOC_LIMIT}% cap) → grid"),
+        (pp_aft_start, pp_aft_end,   "self-consumption",   "self_consumption",
+         "hold battery (partial peak)"),
+        (fd_start,     fd_end,       "Forced Discharge",   "forced_discharge",
+         fd_detail),
+        (pp_eve_start, pp_eve_end,   "self-consumption",   "self_consumption",
+         "battery + PV balance load (partial peak)"),
+    ]
 
     def _fmt(h):
-        # Wrap around (h could be > 23.999 for next-day events)
         h_mod = h % 24
         hh = int(h_mod)
         mm = int(round((h_mod - hh) * 60))
         if mm == 60:
             hh = (hh + 1) % 24
             mm = 0
+        if hh == 24:
+            return "12a"   # midnight, end of day
         suffix = "p" if hh >= 12 else "a"
         h12 = hh % 12 or 12
         return f"{h12}:{mm:02d}{suffix}" if mm else f"{h12}{suffix}"
 
     out = []
-    for e in events:
-        kind = e["kind"]
-        is_active = e["start_h"] <= h_now < e["end_h"]
+    for start, end, label, kind, detail in phases:
+        if end <= h_now:
+            continue  # already past
+        is_active = start <= h_now < end
+        slot_start = max(start, h_now)
         out.append({
-            "start": _fmt(e["start_h"]),
-            "end":   _fmt(e["end_h"]),
-            "label": "Forced Discharge" if kind == "forced_discharge" else idle_label,
-            "detail": fd_detail if kind == "forced_discharge" else idle_detail,
+            "start":  _fmt(slot_start),
+            "end":    _fmt(end),
+            "label":  label,
+            "detail": detail,
             "kind":   kind,
             "active": is_active,
         })
@@ -1210,8 +1199,9 @@ HTML_TEMPLATE = '''
         .sched-row .sched-range { color: #aaa; white-space: nowrap; }
         .sched-row .sched-body  { color: #ddd; }
         .sched-row .sched-detail { color: #888; font-size: 0.85em; margin-left: 4px; }
-        .sched-row.sched-forced_discharge .sched-body { color: #f39c12; font-weight: 600; }
-        .sched-row.sched-idle .sched-body            { color: #95a5a6; }
+        .sched-row.sched-forced_discharge .sched-body  { color: #f39c12; font-weight: 600; }
+        .sched-row.sched-pv_charge .sched-body         { color: #2ecc71; font-weight: 600; }
+        .sched-row.sched-self_consumption .sched-body  { color: #95a5a6; }
         .sched-row.sched-active {
             background: rgba(255,255,255,0.08);
             border-left: 3px solid #f1c40f;
