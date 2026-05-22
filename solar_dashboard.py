@@ -852,6 +852,15 @@ HTML_TEMPLATE = '''
             letter-spacing: 0.02em;
             white-space: nowrap;
         }
+        /* Battery upper-right SOC · V · A — all three bold for legibility */
+        .card-meta-tag.battery-tag {
+            font-weight: 700;
+            color: #ddd;
+        }
+        /* Sign-colored battery current: green when charging, blue when discharging */
+        .card-meta-tag.battery-tag #battery-current.charging    { color: #2ecc71; }
+        .card-meta-tag.battery-tag #battery-current.discharging { color: #3498db; }
+        .card-meta-tag.battery-tag #battery-current.idle        { color: #888; }
         .power-card .value {
             margin-top: 6px;
             font-size: 2.1em;
@@ -1326,9 +1335,10 @@ HTML_TEMPLATE = '''
                 <div class="power-card">
                     <div class="power-card-header">
                         <div class="label">Battery</div>
-                        <div class="card-meta-tag">
+                        <div class="card-meta-tag battery-tag">
                             <span id="battery-soc">--%</span>
                             &nbsp;<span id="battery-voltage">-- V</span>
+                            &nbsp;<span id="battery-current">-- A</span>
                         </div>
                     </div>
                     <div class="value battery idle" id="battery-top-power">--</div>
@@ -2797,9 +2807,23 @@ HTML_TEMPLATE = '''
                         .every((power) => numericPower(power) === 0);
                     document.getElementById('pv-arrays-section').classList.toggle('mppt-zero', allMpptIdle);
 
-                    // Upper-right info on the Battery card
+                    // Upper-right info on the Battery card: SOC · V · A
+                    // (current computed from power/voltage; sign = direction)
                     document.getElementById('battery-soc').textContent = inv.battery_soc + '%';
                     document.getElementById('battery-voltage').textContent = inv.battery_voltage.toFixed(1) + 'V';
+                    const chgW = numericPower(inv.battery_charge_power);
+                    const disW = numericPower(inv.battery_discharge_power);
+                    const netW = chgW - disW;                      // +chg / -dis
+                    const v    = numericPower(inv.battery_voltage);
+                    const amps = v > 0 ? netW / v : 0;
+                    const ampsEl = document.getElementById('battery-current');
+                    const ampsStr = (amps === 0)
+                        ? '0A'
+                        : (amps > 0 ? '+' : '−') + Math.abs(amps).toFixed(0) + 'A';
+                    ampsEl.textContent = ampsStr;
+                    ampsEl.classList.toggle('charging',    amps > 0.5);
+                    ampsEl.classList.toggle('discharging', amps < -0.5);
+                    ampsEl.classList.toggle('idle',        Math.abs(amps) <= 0.5);
 
                     // Upper-right on Grid card (temperature only — frequency and
                     // BMS amperage and inverter output power are intentionally not
