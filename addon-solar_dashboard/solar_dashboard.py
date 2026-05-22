@@ -564,7 +564,8 @@ async def fetch_inverter_data():
             "battery_soc": inverter.battery_soc,
             "battery_charge_power": inverter.battery_charge_power,
             "battery_discharge_power": inverter.battery_discharge_power,
-            "battery_temperature": inverter.battery_temperature,
+            # battery_temperature deliberately omitted — sensor reports a stuck
+            # ~2°C value that's nowhere near real cell temp. Don't surface it.
             "max_charge_current": max_chg_corrected,
             "max_discharge_current": max_dis_corrected,
             "grid_voltage": inverter.grid_voltage_r,
@@ -782,6 +783,17 @@ HTML_TEMPLATE = '''
         .card-grid > .section {
             margin: 0;
         }
+        /* Two-column row used for Import Events (left) + PV Arrays (right).
+           Collapses to a single column on narrow viewports. */
+        .two-col-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 12px;
+            margin-bottom: 15px;
+        }
+        .two-col-row > .section {
+            margin: 0;
+        }
         .power-card {
             min-width: 0;
             background: rgba(255,255,255,0.05);
@@ -795,8 +807,8 @@ HTML_TEMPLATE = '''
             letter-spacing: 0.06em;
         }
         .power-card .value {
-            margin-top: 4px;
-            font-size: 1.25em;
+            margin-top: 6px;
+            font-size: 2.1em;
             font-weight: 700;
             line-height: 1.05;
             font-variant-numeric: tabular-nums;
@@ -1197,9 +1209,6 @@ HTML_TEMPLATE = '''
             <div id="loading">Loading 3D scene...</div>
         </div>
         <div id="stats-panel">
-            <h1>Solar Dashboard</h1>
-            <div class="subtitle">Oakland, CA - Live System Monitor</div>
-
             <div class="section power-summary">
                 <div class="power-card">
                     <div class="label">PV Power</div>
@@ -1257,23 +1266,27 @@ HTML_TEMPLATE = '''
                 </div>
             </div>
 
-            <div class="section">
-                <div class="section-title"><span class="icon">⚠️</span> Import Events (last 24h)</div>
-                <div id="import-events-list">
-                    <div class="event-empty">No imports in the last 24h ✓</div>
-                </div>
-            </div>
+            <!-- Hidden — these change but are only useful for the 3D animation,
+                 not as readable stats. Kept in DOM so updateSunPosition / data
+                 fetch code doesn't have to special-case them. -->
+            <span id="sun-altitude" style="display:none">--°</span>
+            <span id="sun-azimuth" style="display:none">--°</span>
 
             <div class="sun-row">
                 <span class="sun-row-label">☀</span>
                 <span class="sun-row-time">↑ <span id="sunrise">--:--</span></span>
                 <span class="sun-row-time">↓ <span id="sunset">--:--</span></span>
             </div>
-            <!-- Hidden — these change but are only useful for the 3D animation,
-                 not as readable stats. Kept in DOM so updateSunPosition / data
-                 fetch code doesn't have to special-case them. -->
-            <span id="sun-altitude" style="display:none">--°</span>
-            <span id="sun-azimuth" style="display:none">--°</span>
+
+            <!-- Two-column row: import events on the left, PV arrays on the right -->
+            <div class="two-col-row">
+
+            <div class="section">
+                <div class="section-title"><span class="icon">⚠️</span> Import Events (last 24h)</div>
+                <div id="import-events-list">
+                    <div class="event-empty">No imports in the last 24h ✓</div>
+                </div>
+            </div>
 
             <div class="section" id="pv-arrays-section">
                 <div class="section-title"><span class="icon">⚡</span> PV Arrays</div>
@@ -1318,6 +1331,8 @@ HTML_TEMPLATE = '''
                 </div>
             </div>
 
+            </div><!-- /.two-col-row -->
+
             <!-- Wrap Battery / Grid / Inverter / Today's Energy in a responsive
                  grid that auto-fits as many columns as fit, with each column at
                  least ~260px wide. On a narrow phone-style sidebar these stack
@@ -1337,10 +1352,6 @@ HTML_TEMPLATE = '''
                 <div class="stat-row">
                     <span class="stat-label">Power</span>
                     <span class="stat-value power" id="battery-power">-- W</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Temperature</span>
-                    <span class="stat-value temp" id="battery-temp">-- °C</span>
                 </div>
             </div>
 
@@ -2681,7 +2692,8 @@ HTML_TEMPLATE = '''
 
                     document.getElementById('battery-power').textContent =
                         formatSignedPower(battPower);
-                    document.getElementById('battery-temp').textContent = inv.battery_temperature + '°C';
+                    // battery-temp removed — sensor reports a stuck value (~2°C),
+                    // not actual cell temp. Don't surface misleading data.
 
                     document.getElementById('grid-export').textContent = formatPower(inv.power_to_grid);
                     document.getElementById('grid-import').textContent = formatPower(inv.consumption_power);
