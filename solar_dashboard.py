@@ -801,7 +801,13 @@ def get_inverter_data_sync():
         if _inverter_cache["loop"] is None or _inverter_cache["loop"].is_closed():
             _inverter_cache["loop"] = asyncio.new_event_loop()
             asyncio.set_event_loop(_inverter_cache["loop"])
-        return _inverter_cache["loop"].run_until_complete(fetch_inverter_data())
+        data = _inverter_cache["loop"].run_until_complete(fetch_inverter_data())
+        # Stash for cross-endpoint reads (e.g. /api/events wants the
+        # daily import counter without re-fetching)
+        if data is not None:
+            _inverter_cache["data"] = data
+            _inverter_cache["last_update"] = datetime.now()
+        return data
 
 
 async def fetch_all_parameters():
@@ -2218,11 +2224,13 @@ HTML_TEMPLATE = '''
                 // Daily counter vs sum of import events. The chart-data is
                 // 4-min sampled — brief imports between sample points are
                 // missed by the events list but caught by the continuous
-                // daily counter. Show the delta as a phantom event row
-                // (time = unknown placeholder).
+                // daily counter. Show the delta as a phantom event row.
+                // Uses the daily_import_kwh value the server includes in
+                // the /api/events response (no race with /api/data).
                 let unaccountedNote = '';
-                if (typeof window._lastInvDailyImport === 'number') {
-                    const dailyKwh = window._lastInvDailyImport;
+                const dailyKwh = (typeof data.daily_import_kwh === 'number')
+                    ? data.daily_import_kwh : null;
+                if (dailyKwh != null) {
                     const captured = (data.events || [])
                         .filter(e => (e.type || 'import') === 'import')
                         .reduce((s, e) => s + (e.kwh || 0), 0);
@@ -4205,10 +4213,18 @@ def _events_sync():
 
 @app.route('/api/events')
 def get_events():
-    """Return today's classified import events."""
+    """Return today's classified import events, plus the inverter's
+    continuous daily import counter so the client can show the
+    chart-data sampling gap as an "unaccounted" row without racing
+    against fetchData()."""
+    daily_import_kwh = None
+    inv_data = _inverter_cache.get("data")
+    if inv_data:
+        daily_import_kwh = inv_data.get("energy_today_import")
     return jsonify({
         "date": datetime.now(TIMEZONE).date().isoformat(),
         "events": _events_sync(),
+        "daily_import_kwh": daily_import_kwh,
     })
 
 
