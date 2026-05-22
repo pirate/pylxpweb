@@ -86,20 +86,9 @@ HOUSE = {
 # - "ground" arrays: need position_ft, size_ft, height_ft
 SOLAR_ARRAYS = [
     {
-        # Hardware: 14 × 550 W panels = 7.7 kW nameplate. Newer panels, minimal
-        # degradation expected. MPPT1 input wired to the SW roof.
-        "name": "SW Roof (MPPT1)",
-        "type": "roof",
-        "azimuth": 217.0,
-        "tilt": 10.0,
-        "capacity_kw": 7.7,
-        "panel_count": 14,
-        "panel_layout": [7, 2],   # 7 cols × 2 rows
-        "color": 0x3498db,        # Blue
-    },
-    {
-        # Hardware: 14 × 550 W panels = 7.7 kW nameplate. MPPT2 input wired to NE roof.
-        "name": "NE Roof (MPPT2)",
+        # Hardware: 14 × 550 W panels = 7.7 kW nameplate. MPPT1 input wired to
+        # the NE roof (verified visually 2026-05-22 — labels were flipped before).
+        "name": "NE Roof (MPPT1)",
         "type": "roof",
         "azimuth": 37.0,
         "tilt": 10.0,
@@ -107,6 +96,18 @@ SOLAR_ARRAYS = [
         "panel_count": 14,
         "panel_layout": [7, 2],
         "color": 0x9b59b6,        # Purple
+    },
+    {
+        # Hardware: 14 × 550 W panels = 7.7 kW nameplate. MPPT2 input wired to
+        # the SW roof. Newer panels, minimal degradation expected.
+        "name": "SW Roof (MPPT2)",
+        "type": "roof",
+        "azimuth": 217.0,
+        "tilt": 10.0,
+        "capacity_kw": 7.7,
+        "panel_count": 14,
+        "panel_layout": [7, 2],
+        "color": 0x3498db,        # Blue
     },
     {
         # MPPT3 is an older/less-efficient set of panels physically distributed
@@ -881,6 +882,62 @@ HTML_TEMPLATE = '''
             color: #888;
             font-size: 0.62em;
         }
+        /* Daily-total meta — bigger and more prominent than the "of 12 kW now"
+           line. Tabular nums so the digits don't shift between samples. */
+        .power-card-meta.daily-meta {
+            font-size: 0.95em;
+            font-weight: 600;
+            color: #ddd;
+            font-variant-numeric: tabular-nums;
+            margin-top: 6px;
+        }
+        .power-card-meta.daily-meta .meta-left  { color: #e74c3c; }   /* import / discharge side */
+        .power-card-meta.daily-meta .meta-right { color: #2ecc71; }   /* export / charge side */
+        .power-card-meta.daily-meta .meta-suffix {
+            color: #777;
+            font-size: 0.7em;
+            font-weight: 400;
+            margin-left: 4px;
+        }
+        /* Bidirectional bar: split at center, fills extend outward.
+           Used for Battery (charge/discharge) and Grid (export/import). */
+        .performance-bar.bidi {
+            position: relative;
+            overflow: visible;       /* allow center marker to extend above/below */
+            background: rgba(255,255,255,0.08);
+        }
+        .performance-bar.bidi::before {
+            /* Vertical line at the 50% center mark */
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: -2px;
+            bottom: -2px;
+            width: 1px;
+            background: rgba(255,255,255,0.4);
+            z-index: 2;
+        }
+        .performance-bar.bidi .fill-left,
+        .performance-bar.bidi .fill-right {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            transition: width 0.4s ease;
+            background: transparent;     /* set per-kind below */
+        }
+        .performance-bar.bidi .fill-left  { right: 50%; border-radius: 4px 0 0 4px; }
+        .performance-bar.bidi .fill-right { left:  50%; border-radius: 0 4px 4px 0; }
+        /* Grid bidi: left = import = red, right = export = green */
+        .performance-bar.bidi.grid .fill-left  { background: #e74c3c; }
+        .performance-bar.bidi.grid .fill-right { background: #2ecc71; }
+        /* Battery bidi: left = discharge = blue, right = charge = green */
+        .performance-bar.bidi.battery .fill-left  { background: #3498db; }
+        .performance-bar.bidi.battery .fill-right { background: #2ecc71; }
+        /* The daily-bidi bar is shorter, like the existing daily-bar */
+        .performance-bar.bidi.daily-bar {
+            height: 6px;
+            margin-top: 7px;
+        }
         .power-card-summary {
             margin-top: 4px;
             font-size: 0.66em;
@@ -984,6 +1041,11 @@ HTML_TEMPLATE = '''
             padding: 2px 0 4px;
         }
         .mppt-zero .mppt-zero-message { display: block; }
+        .history-chart-wrap {
+            position: relative;
+            height: 280px;
+            margin-top: 4px;
+        }
         .last-update {
             text-align: center;
             color: #666;
@@ -1239,9 +1301,9 @@ HTML_TEMPLATE = '''
                     <div class="performance-bar daily-bar">
                         <div class="fill" id="pv-daily-fill" style="width: 0%"></div>
                     </div>
-                    <div class="power-card-meta">
-                        <span id="pv-daily-text">--</span>
-                        <span id="pv-daily-target">of -- max</span>
+                    <div class="power-card-meta daily-meta">
+                        <span id="pv-daily-text" style="color:#f39c12;">--</span>
+                        <span class="meta-suffix" id="pv-daily-target">of -- max</span>
                     </div>
                 </div>
                 <div class="power-card">
@@ -1253,19 +1315,21 @@ HTML_TEMPLATE = '''
                         </div>
                     </div>
                     <div class="value battery idle" id="battery-top-power">--</div>
-                    <div class="performance-bar">
-                        <div class="fill battery" id="battery-load-fill" style="width: 0%"></div>
+                    <div class="performance-bar bidi battery">
+                        <div class="fill-left"  id="battery-load-left"  style="width: 0%"></div>
+                        <div class="fill-right" id="battery-load-right" style="width: 0%"></div>
                     </div>
                     <div class="power-card-meta">
                         <span id="battery-load-text">--%</span>
-                        <span>of 12 kW now</span>
+                        <span>of ±12 kW now</span>
                     </div>
-                    <div class="performance-bar daily-bar">
-                        <div class="fill battery" id="battery-daily-fill" style="width: 0%"></div>
+                    <div class="performance-bar bidi battery daily-bar">
+                        <div class="fill-left"  id="battery-daily-left"  style="width: 0%"></div>
+                        <div class="fill-right" id="battery-daily-right" style="width: 0%"></div>
                     </div>
-                    <div class="power-card-meta">
-                        <span id="battery-daily-text">--</span>
-                        <span id="battery-daily-target">of -- cap</span>
+                    <div class="power-card-meta daily-meta">
+                        <span class="meta-left"  id="battery-daily-discharged">-- kWh<span class="meta-suffix">out</span></span>
+                        <span class="meta-right" id="battery-daily-charged">-- kWh<span class="meta-suffix">in</span></span>
                     </div>
                 </div>
                 <div class="power-card">
@@ -1276,19 +1340,21 @@ HTML_TEMPLATE = '''
                         </div>
                     </div>
                     <div class="value grid idle" id="grid-top-power">--</div>
-                    <div class="performance-bar">
-                        <div class="fill grid" id="grid-load-fill" style="width: 0%"></div>
+                    <div class="performance-bar bidi grid">
+                        <div class="fill-left"  id="grid-load-left"  style="width: 0%"></div>
+                        <div class="fill-right" id="grid-load-right" style="width: 0%"></div>
                     </div>
                     <div class="power-card-meta">
                         <span id="grid-load-text">--%</span>
-                        <span>of 12 kW now</span>
+                        <span>of ±12 kW now</span>
                     </div>
-                    <div class="performance-bar daily-bar">
-                        <div class="fill grid" id="grid-daily-fill" style="width: 0%"></div>
+                    <div class="performance-bar bidi grid daily-bar">
+                        <div class="fill-left"  id="grid-daily-left"  style="width: 0%"></div>
+                        <div class="fill-right" id="grid-daily-right" style="width: 0%"></div>
                     </div>
-                    <div class="power-card-meta">
-                        <span id="grid-daily-text">--</span>
-                        <span id="grid-daily-target">of -- max</span>
+                    <div class="power-card-meta daily-meta">
+                        <span class="meta-left"  id="grid-daily-imported">-- kWh<span class="meta-suffix">imp</span></span>
+                        <span class="meta-right" id="grid-daily-exported">-- kWh<span class="meta-suffix">exp</span></span>
                     </div>
                 </div>
                 <div class="power-card">
@@ -1304,9 +1370,9 @@ HTML_TEMPLATE = '''
                     <div class="performance-bar daily-bar">
                         <div class="fill home" id="home-daily-fill" style="width: 0%"></div>
                     </div>
-                    <div class="power-card-meta">
-                        <span id="home-daily-text">--</span>
-                        <span id="home-daily-target">usage today</span>
+                    <div class="power-card-meta daily-meta">
+                        <span id="home-daily-text" style="color:#1abc9c;">--</span>
+                        <span class="meta-suffix" id="home-daily-target">of 45 kWh</span>
                     </div>
                 </div>
             </div>
@@ -1323,7 +1389,7 @@ HTML_TEMPLATE = '''
             <div class="section" id="pv-arrays-section">
                 <div class="mppt-zero-message">All MPPT inputs idle (0 W)</div>
                 <div class="mppt-line mppt-row">
-                    <span class="mppt-name"><span class="mppt-dot sw"></span> MPPT 1 (SW)</span>
+                    <span class="mppt-name"><span class="mppt-dot ne"></span> MPPT 1 (NE)</span>
                     <span class="mppt-voltage-text" id="pv1-detail">-- V / -- A</span>
                     <span class="mppt-power-text" id="pv1">-- W</span>
                 </div>
@@ -1331,7 +1397,7 @@ HTML_TEMPLATE = '''
                     <div class="mppt-voltage-bar"><div class="fill" id="pv1-voltage-fill"></div></div>
                 </div>
                 <div class="mppt-line mppt-row">
-                    <span class="mppt-name"><span class="mppt-dot ne"></span> MPPT 2 (NE)</span>
+                    <span class="mppt-name"><span class="mppt-dot sw"></span> MPPT 2 (SW)</span>
                     <span class="mppt-voltage-text" id="pv2-detail">-- V / -- A</span>
                     <span class="mppt-power-text" id="pv2">-- W</span>
                 </div>
@@ -1350,23 +1416,20 @@ HTML_TEMPLATE = '''
 
             </div><!-- /.two-col-row -->
 
+            <!-- TOU & Mode split into two side-by-side cards via the same
+                 .two-col-row grid used above. Left card = operating mode +
+                 schedule; right card = rates + earnings. -->
+            <div class="two-col-row">
+
             <div class="section">
-                <div class="section-title"><span class="icon">🕒</span> TOU & Mode</div>
+                <div class="section-title"><span class="icon">⚙️</span> Mode</div>
                 <div class="stat-row">
-                    <span class="stat-label">Mode</span>
+                    <span class="stat-label">Operation</span>
                     <span class="stat-value">
                         <span id="op-mode">--</span>
                         &nbsp;·&nbsp;
                         <span class="good" id="inverter-status">--</span>
                     </span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">PG&amp;E Period</span>
-                    <span class="stat-value" id="tou-period">--</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Ava Bonus Window</span>
-                    <span class="stat-value" id="ava-bonus">--</span>
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">Forced Discharge</span>
@@ -1380,6 +1443,14 @@ HTML_TEMPLATE = '''
                     <span class="stat-label">Discharge Floor</span>
                     <span class="stat-value" id="discharge-floor">40 %</span>
                 </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title"><span class="icon">💰</span> Rates</div>
+                <div class="stat-row">
+                    <span class="stat-label">PG&amp;E Period</span>
+                    <span class="stat-value" id="tou-period">--</span>
+                </div>
                 <div class="stat-row">
                     <span class="stat-label">Export rate now</span>
                     <span class="stat-value" id="export-rate-now">--</span>
@@ -1391,6 +1462,16 @@ HTML_TEMPLATE = '''
                 <div class="stat-row">
                     <span class="stat-label">$/hr (estimate)</span>
                     <span class="stat-value" id="dollars-per-hour">--</span>
+                </div>
+            </div>
+
+            </div><!-- /.two-col-row TOU split -->
+
+            <!-- 24h history chart: PV / Battery SOC / Grid in+out / Home -->
+            <div class="section">
+                <div class="section-title"><span class="icon">📈</span> Last 24 hours</div>
+                <div class="history-chart-wrap">
+                    <canvas id="history-chart"></canvas>
                 </div>
             </div>
 
@@ -1430,6 +1511,8 @@ HTML_TEMPLATE = '''
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script>
         // Configuration injected from Python
         const CONFIG = {{ config_json | safe }};
@@ -1658,6 +1741,98 @@ HTML_TEMPLATE = '''
             // Events poll separately (slower — events change at minute-scale)
             fetchEvents();
             setInterval(fetchEvents, 60000);
+            // History chart — refresh every 5 min (4-min source resolution)
+            fetchHistory();
+            setInterval(fetchHistory, 5 * 60 * 1000);
+        }
+
+        let historyChart;
+        async function fetchHistory() {
+            try {
+                const r = await fetch('/api/history');
+                const data = await r.json();
+                renderHistoryChart(data.samples || []);
+            } catch (e) {
+                console.warn('history fetch failed', e);
+            }
+        }
+
+        function renderHistoryChart(samples) {
+            const canvas = document.getElementById('history-chart');
+            if (!canvas || typeof Chart === 'undefined') return;
+
+            // Convert "YYYY-MM-DD HH:MM:SS" → JS Date for the X axis.
+            const labels = samples.map(s => new Date(s.t.replace(' ', 'T')));
+
+            // Card-matching colors so the chart legend is self-explanatory.
+            const datasets = [
+                { label: 'Solar PV',  data: samples.map(s => s.pv_kw),     borderColor: '#f39c12', backgroundColor: 'rgba(243,156,18,0.0)',  yAxisID: 'kw' },
+                { label: 'Home',      data: samples.map(s => s.home_kw),   borderColor: '#1abc9c', backgroundColor: 'rgba(26,188,156,0.0)',  yAxisID: 'kw' },
+                { label: 'Grid Export', data: samples.map(s => s.export_kw), borderColor: '#2ecc71', backgroundColor: 'rgba(46,204,113,0.0)', yAxisID: 'kw' },
+                { label: 'Grid Import', data: samples.map(s => s.import_kw), borderColor: '#e74c3c', backgroundColor: 'rgba(231,76,60,0.0)',  yAxisID: 'kw' },
+                { label: 'Battery SOC', data: samples.map(s => s.soc),     borderColor: '#9b59b6', backgroundColor: 'rgba(155,89,182,0.0)',  yAxisID: 'pct', borderDash: [4, 3] },
+            ];
+            datasets.forEach(d => {
+                d.borderWidth = 2;
+                d.pointRadius = 0;
+                d.pointHoverRadius = 3;
+                d.tension = 0.25;
+                d.spanGaps = true;
+            });
+
+            const cfg = {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: { color: '#ddd', font: { size: 11 }, boxWidth: 12, padding: 8 },
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(20,20,28,0.95)',
+                            titleColor: '#fff', bodyColor: '#ddd',
+                            borderColor: '#444', borderWidth: 1,
+                        },
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'hour',
+                                displayFormats: { hour: 'HH:mm' },
+                                tooltipFormat: 'MMM d, HH:mm',
+                            },
+                            ticks: { color: '#888', maxRotation: 0 },
+                            grid:  { color: 'rgba(255,255,255,0.05)' },
+                        },
+                        kw: {
+                            type: 'linear', position: 'left',
+                            title: { display: true, text: 'kW', color: '#888' },
+                            ticks: { color: '#888' },
+                            grid:  { color: 'rgba(255,255,255,0.06)' },
+                        },
+                        pct: {
+                            type: 'linear', position: 'right',
+                            min: 0, max: 100,
+                            title: { display: true, text: '%', color: '#9b59b6' },
+                            ticks: { color: '#9b59b6' },
+                            grid:  { drawOnChartArea: false },
+                        },
+                    },
+                },
+            };
+
+            if (historyChart) {
+                historyChart.data = cfg.data;
+                historyChart.update('none');
+            } else {
+                historyChart = new Chart(canvas.getContext('2d'), cfg);
+            }
         }
 
         async function fetchEvents() {
@@ -1991,25 +2166,37 @@ HTML_TEMPLATE = '''
                             : (kind === 'home')    ? 'home-top-power'
                             : 'total-pv';
             const valueEl = document.getElementById(valueElId);
-            const fillEl = document.getElementById(kind + '-load-fill');
-            const textEl = document.getElementById(kind + '-load-text');
+            const textEl  = document.getElementById(kind + '-load-text');
 
-            // PV and Home are always positive (no signed value); battery + grid show +/-
             const signed = (kind === 'battery' || kind === 'grid');
             valueEl.textContent = signed ? formatSignedPower(value) : formatPower(value);
-            fillEl.style.width = loadPercent.toFixed(1) + '%';
-            textEl.textContent = loadPercent.toFixed(0) + '%';
+
+            if (signed) {
+                // Bidirectional bar: each half is 50% wide max, value scales to that.
+                const halfPct = Math.min(50, Math.abs(value) / maxW * 50);
+                const leftEl  = document.getElementById(kind + '-load-left');
+                const rightEl = document.getElementById(kind + '-load-right');
+                leftEl.style.width  = (value < 0 ? halfPct : 0).toFixed(1) + '%';
+                rightEl.style.width = (value > 0 ? halfPct : 0).toFixed(1) + '%';
+                // Centered % text — show signed direction (e.g. "-12%" or "+45%")
+                const signedPct = (value === 0) ? '0%'
+                                : (value > 0 ? '+' : '-') + loadPercent.toFixed(0) + '%';
+                textEl.textContent = signedPct;
+            } else {
+                // Single-sided bar (PV, Home)
+                const fillEl = document.getElementById(kind + '-load-fill');
+                fillEl.style.width = loadPercent.toFixed(1) + '%';
+                textEl.textContent = loadPercent.toFixed(0) + '%';
+            }
 
             if (kind === 'battery') {
                 valueEl.classList.toggle('charging', value > 0);
                 valueEl.classList.toggle('discharging', value < 0);
                 valueEl.classList.toggle('idle', value === 0);
             } else if (kind === 'grid') {
-                // Positive = exporting (good, money in), negative = importing (bad, money out)
                 valueEl.classList.toggle('exporting', value > 0);
                 valueEl.classList.toggle('importing', value < 0);
                 valueEl.classList.toggle('idle', value === 0);
-                fillEl.classList.toggle('importing', value < 0);
             } else if (kind === 'home') {
                 valueEl.classList.toggle('idle', value === 0);
             }
@@ -2630,27 +2817,49 @@ HTML_TEMPLATE = '''
                     const expectedDaily = data.expected_daily_kwh || 0;
                     const batCap = data.total_battery_kwh || 46;
                     const exportTarget = expectedDaily * 0.5;
-                    // Daily home usage budget — our typical day is ~20 kWh.
-                    const homeBudget = 20;
+                    // Practical home-usage ceiling — heat-pump days hit ~30 kWh,
+                    // EV charging would push it; 45 kWh is a generous cap so the
+                    // bar shows meaningful fill on a normal day (~20 kWh = 44%).
+                    const homeBudget = 45;
 
-                    const setDaily = (kind, current, target, label) => {
+                    // Single-sided daily bar: PV, Home.
+                    const setDailySingle = (kind, current, target, label) => {
                         const pct = target > 0 ? Math.min(100, current / target * 100) : 0;
                         document.getElementById(kind + '-daily-fill').style.width = pct.toFixed(1) + '%';
                         document.getElementById(kind + '-daily-text').textContent = label;
-                        document.getElementById(kind + '-daily-target').textContent =
-                            'of ' + target.toFixed(0) + ' max';
                     };
+                    setDailySingle('pv',   yld,   expectedDaily, `${yld.toFixed(1)} kWh today`);
+                    setDailySingle('home', usage, homeBudget,    `${usage.toFixed(1)} kWh`);
+                    document.getElementById('pv-daily-target').textContent =
+                        `of ${expectedDaily.toFixed(0)} max`;
+                    document.getElementById('home-daily-target').textContent =
+                        `of ${homeBudget.toFixed(0)} kWh`;
 
-                    setDaily('pv', yld, expectedDaily,
-                             `${yld.toFixed(1)} kWh today`);
-                    setDaily('battery', chg + dis, batCap,
-                             `+${chg.toFixed(1)} / -${dis.toFixed(1)} kWh`);
-                    document.getElementById('battery-daily-target').textContent =
-                        `${batCap.toFixed(0)} kWh cap`;
-                    setDaily('grid', exp, exportTarget,
-                             `+${exp.toFixed(1)}${imp > 0.05 ? ' / -' + imp.toFixed(1) : ''} kWh`);
-                    setDaily('home', usage, homeBudget,
-                             `${usage.toFixed(1)} kWh today`);
+                    // Bidirectional daily bars: Battery (chg/dis), Grid (exp/imp).
+                    // Each half is 50% wide max → value scales to that half.
+                    const setDailyBidi = (kind, leftVal, rightVal, target,
+                                          leftLabel, rightLabel) => {
+                        const leftPct  = target > 0 ? Math.min(50, leftVal  / target * 50) : 0;
+                        const rightPct = target > 0 ? Math.min(50, rightVal / target * 50) : 0;
+                        document.getElementById(kind + '-daily-left').style.width  = leftPct.toFixed(1) + '%';
+                        document.getElementById(kind + '-daily-right').style.width = rightPct.toFixed(1) + '%';
+                        document.getElementById(leftLabel.id).innerHTML  = leftLabel.html;
+                        document.getElementById(rightLabel.id).innerHTML = rightLabel.html;
+                    };
+                    // Battery: total cycled energy ~= batCap is a "full charge OR full
+                    // discharge"; each side's bar maxes out at batCap.
+                    setDailyBidi('battery', dis, chg, batCap,
+                        { id: 'battery-daily-discharged',
+                          html: `${dis.toFixed(1)} kWh<span class="meta-suffix">out</span>` },
+                        { id: 'battery-daily-charged',
+                          html: `${chg.toFixed(1)} kWh<span class="meta-suffix">in</span>` });
+                    // Grid: export target = expectedDaily/2 (matches the original
+                    // single-sided bar). Import target same so visual scale matches.
+                    setDailyBidi('grid', imp, exp, exportTarget,
+                        { id: 'grid-daily-imported',
+                          html: `${imp.toFixed(1)} kWh<span class="meta-suffix">imp</span>` },
+                        { id: 'grid-daily-exported',
+                          html: `${exp.toFixed(1)} kWh<span class="meta-suffix">exp</span>` });
                 }
 
                 // TOU + mode panel
@@ -2662,9 +2871,6 @@ HTML_TEMPLATE = '''
                     if (sch.in_peak) touText = '🔴 PEAK';
                     else if (sch.in_partial_peak) touText = '🟡 partial peak';
                     document.getElementById('tou-period').textContent = touText;
-
-                    document.getElementById('ava-bonus').textContent =
-                        sch.in_ava_bonus ? '✓ active (+$0.025/kWh)' : 'inactive';
 
                     document.getElementById('forced-discharge-status').textContent =
                         sch.in_forced_discharge_window ? '🔋→⚡ ACTIVE' : 'idle';
@@ -2678,8 +2884,14 @@ HTML_TEMPLATE = '''
                     }
 
                     if (sch.rates) {
-                        document.getElementById('export-rate-now').textContent =
-                            '$' + sch.rates.currently_active_export_rate.toFixed(3) + '/kWh';
+                        // Show export rate, append a small "+Ava" badge when the
+                        // Ava community-energy peak-export bonus is active.
+                        const exportRate = sch.rates.currently_active_export_rate;
+                        let exportText = '$' + exportRate.toFixed(3) + '/kWh';
+                        if (sch.in_ava_bonus) {
+                            exportText += ' <span style="color:#2ecc71;font-size:0.82em;font-weight:600;">+Ava bonus</span>';
+                        }
+                        document.getElementById('export-rate-now').innerHTML = exportText;
                         document.getElementById('import-rate-now').textContent =
                             '$' + sch.rates.currently_active_import_rate.toFixed(2) + '/kWh';
                     }
@@ -3224,6 +3436,109 @@ def get_events():
         "date": datetime.now(TIMEZONE).date().isoformat(),
         "events": _events_sync(),
     })
+
+
+# --- 24h history (for the chart at the bottom of the dashboard) -----------
+#
+# Pulls 4-min-sampled analytics series for yesterday + today, merges to a
+# single timeline, and returns kW values (signed where appropriate) plus
+# battery SOC %. Cached 60s so repeated chart redraws don't hammer the API.
+_HISTORY_CACHE: dict = {"ts": None, "data": None}
+
+
+async def _fetch_24h_history():
+    from datetime import timedelta as _td
+    now = datetime.now(TIMEZONE)
+    today = now.date()
+    yesterday = today - _td(days=1)
+    cutoff = now - _td(hours=24)
+
+    inverter = _inverter_cache.get("inverter")
+    client = _inverter_cache.get("client")
+    if not inverter or not client:
+        return {"samples": []}
+    serial = inverter.serial_number
+
+    # Fields we want for each day. pToGrid + pToUser are signed by direction
+    # (each is non-negative; sign comes from which field is non-zero).
+    fields = ["ppv", "pCharge", "pDischarge", "pToUser", "pToGrid", "soc"]
+    tasks = []
+    for d in (yesterday, today):
+        for f in fields:
+            tasks.append(client.analytics.get_chart_data(serial, f, d.isoformat()))
+    try:
+        all_results = await asyncio.gather(*tasks, return_exceptions=True)
+    except Exception as e:
+        print(f"history fetch error: {e}", flush=True)
+        return {"samples": []}
+
+    # Build {time -> {field: value}} dictionary across both days
+    timeline: dict[str, dict[str, float]] = {}
+    for i, res in enumerate(all_results):
+        if isinstance(res, Exception):
+            continue
+        field = fields[i % len(fields)]
+        for sample in (res.get("data", []) or []):
+            t = sample.get("time")
+            if not t:
+                continue
+            try:
+                ts = datetime.strptime(t, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TIMEZONE)
+            except ValueError:
+                continue
+            if ts < cutoff:
+                continue
+            timeline.setdefault(t, {})[field] = sample.get("value") or 0
+
+    # Sort by time and emit one row per timestamp
+    out_samples = []
+    for t in sorted(timeline.keys()):
+        v = timeline[t]
+        pv      = float(v.get("ppv", 0))            # W (Luxpower returns W for ppv)
+        charge  = float(v.get("pCharge", 0))         # W
+        discharge = float(v.get("pDischarge", 0))    # W
+        to_user = float(v.get("pToUser", 0))         # W — grid import
+        to_grid = float(v.get("pToGrid", 0))         # W — grid export
+        soc     = float(v.get("soc", 0))             # %
+
+        # Home consumption is not directly in chart data; reconstruct from
+        # energy balance: load = pv + discharge - charge + to_user - to_grid.
+        # (Same as the runtime "consumption_power" field.)
+        home = max(0.0, pv + discharge - charge + to_user - to_grid)
+
+        out_samples.append({
+            "t": t,
+            "pv_kw":     round(pv / 1000.0, 3),
+            "battery_kw": round((charge - discharge) / 1000.0, 3),  # +chg / -dis
+            "import_kw": round(to_user / 1000.0, 3),
+            "export_kw": round(to_grid / 1000.0, 3),
+            "home_kw":   round(home / 1000.0, 3),
+            "soc":       round(soc, 1),
+        })
+    return {"samples": out_samples}
+
+
+def _history_sync():
+    if _HISTORY_CACHE["ts"] and (datetime.now() - _HISTORY_CACHE["ts"]).total_seconds() < 60:
+        return _HISTORY_CACHE["data"]
+    with _LOOP_LOCK:
+        loop = _inverter_cache.get("loop")
+        if loop is None or loop.is_closed():
+            return _HISTORY_CACHE["data"] or {"samples": []}
+        try:
+            data = loop.run_until_complete(_fetch_24h_history())
+        except Exception as e:
+            print(f"history sync error: {e}", flush=True)
+            data = _HISTORY_CACHE.get("data") or {"samples": []}
+    _HISTORY_CACHE["ts"] = datetime.now()
+    _HISTORY_CACHE["data"] = data
+    return data
+
+
+@app.route('/api/history')
+def get_history():
+    """Return 24h of 4-min-sampled history for the chart at the bottom."""
+    return jsonify(_history_sync())
 
 
 if __name__ == '__main__':
