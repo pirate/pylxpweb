@@ -1199,6 +1199,16 @@ HTML_TEMPLATE = '''
             font-size: 0.78em;
         }
         .event-row.event-old .event-reason { font-weight: 400; }
+        /* Unaccounted-imports placeholder row: synthetic, no real time, so
+           the time column shows --:--? and everything is greyed. */
+        .event-row.event-unaccounted {
+            opacity: 0.55;
+        }
+        .event-row.event-unaccounted .event-time { color: #666; }
+        .event-row.event-unaccounted .event-reason {
+            color: #aaa;
+            font-weight: 400;
+        }
         /* BMS limit-change events: distinct color from import events.
            Downgrade = orange (concerning), upgrade = green (recovery). */
         .event-row.event-bms .event-reason { font-weight: 600; }
@@ -2205,10 +2215,11 @@ HTML_TEMPLATE = '''
                 const listEl = document.getElementById('import-events-list');
                 if (!listEl) return;
 
-                // Daily counter vs sum of import events — if there's a
-                // gap, that's brief imports that fell between the 4-min
-                // chart-data samples. Show it as a footer note so the
-                // user knows the events list is a lower bound.
+                // Daily counter vs sum of import events. The chart-data is
+                // 4-min sampled — brief imports between sample points are
+                // missed by the events list but caught by the continuous
+                // daily counter. Show the delta as a phantom event row
+                // (time = unknown placeholder).
                 let unaccountedNote = '';
                 if (typeof window._lastInvDailyImport === 'number') {
                     const dailyKwh = window._lastInvDailyImport;
@@ -2217,7 +2228,12 @@ HTML_TEMPLATE = '''
                         .reduce((s, e) => s + (e.kwh || 0), 0);
                     const gap = dailyKwh - captured;
                     if (gap > 0.005) {
-                        unaccountedNote = `<div class="event-meta" style="padding:6px 0;color:#888;">+ ${gap.toFixed(3)} kWh unaccounted (brief imports between 4-min samples)</div>`;
+                        unaccountedNote = `<div class="event-row event-unaccounted">
+                            <div class="event-time">--:--?</div>
+                            <div class="event-details">
+                                <div class="event-reason">-${gap.toFixed(3)} kWh imported (unaccounted)</div>
+                            </div>
+                        </div>`;
                     }
                 }
 
