@@ -1,0 +1,24 @@
+fix_battery_limits.py
+  s_5a300c8feab054::t_bae6dadbb325b5 49-53,57-62
+  s_5a300c8feab054::t_8038d26508988a 74-78,92-103
+snapshot_settings.py
+  s_5a300c8feab054::t_1a23ead1688590 1-53
+apply_export_lock.py
+  s_5a300c8feab054::t_2d68bd42be286e 1-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "96b481e0c122b7833f3f0635386908ec5f86a63d",
+  "prompts": {},
+  "sessions": {
+    "s_5a300c8feab054": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb927930-58d5-41d1-8103-42fcc934a2f7",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Nick Sweeting <git@sweeting.me>"
+    }
+  }
+}
