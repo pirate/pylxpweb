@@ -1248,15 +1248,15 @@ HTML_TEMPLATE = '''
         .grid-money-row .money-imp .kwh-unit,
         .grid-money-row .money-exp .kwh-unit {
             font-weight: 400;
-            font-size: 0.7em;
-            opacity: 0.7;
+            font-size: 0.55em;
+            opacity: 0.65;
             margin-left: 2px;
         }
         .grid-money-row .money-imp .rate-mult,
         .grid-money-row .money-exp .rate-mult {
             font-weight: 400;
-            font-size: 0.7em;
-            opacity: 0.7;
+            font-size: 0.55em;
+            opacity: 0.65;
             margin-left: 4px;
         }
         /* Net $ in center — slightly smaller than the side numbers so it
@@ -3518,11 +3518,11 @@ HTML_TEMPLATE = '''
                         document.getElementById('grid-daily-imported').innerHTML =
                             `<span class="kwh-num">${impKwh.toFixed(2)}</span>`
                             + `<span class="kwh-unit">kWh</span>`
-                            + `<span class="rate-mult">× ${(impRate*100).toFixed(1)}¢ now</span>`;
+                            + `<span class="rate-mult">× ${(impRate*100).toFixed(1)}¢</span>`;
                         document.getElementById('grid-daily-exported').innerHTML =
                             `<span class="kwh-num">${expKwh.toFixed(1)}</span>`
                             + `<span class="kwh-unit">kWh</span>`
-                            + `<span class="rate-mult">× ${(expRate*100).toFixed(1)}¢ now</span>`;
+                            + `<span class="rate-mult">× ${(expRate*100).toFixed(1)}¢</span>`;
                         // TOU-aware net (server-computed). Fall back to the
                         // current-rate approximation if not yet loaded.
                         const tm = data.today_money;
