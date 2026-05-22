@@ -152,23 +152,34 @@ RIDGELINE_AZIMUTH = (_sw_array["azimuth"] - 90) if _sw_array else 127.0
 # System efficiency — aspirational model.
 # Represents the best realistic case if everything were optimal:
 #   - Panels perfectly clean (no soiling losses)
-#   - Real-world inverter efficiency (~94-96%)
-#   - Real wiring + connector losses (~2%)
-#   - Mild soiling (~3%)
+# Two-tier model:
+#   instantaneous "expected_power" → clear-sky peak (PV bar % never >100%)
+#   daily "expected_daily_kwh"     → typical good-day total (~85 kWh max)
+# The difference between them is the "daily availability factor" — how much
+# of the clear-sky theoretical max we actually realize over a full day,
+# averaging the marine layer mornings, occasional afternoon clouds, etc.
+
+#   - Inverter efficiency at peak (~96%)
+#   - Wiring + connector losses (~2%)
 #   - Module mismatch + DC/AC ratio (~2%)
-#   - Older split-array (MPPT3) underperforms its nameplate ~10-15%
-# Combined → ~0.80 effective system-level derate for our install.
-SYSTEM_EFFICIENCY = 0.80
+# Combined → ~0.92 effective peak-conditions derate. Soiling and old-string
+# losses are NOT in here — those apply more strongly over a full day, so
+# they're rolled into DAILY_AVAIL_FACTOR below.
+SYSTEM_EFFICIENCY = 0.92
 
-# Atmospheric clear-sky transmittance for the air-mass DNI model. Textbook
-# Bird-Hulstrom uses 0.7 (Sahara-clear). Coastal Bay-Area sky has marine
-# layer + haze; 0.58 calibrated against measured peak output at Oakland.
-ATMOS_TRANSMITTANCE = 0.58
+# Standard Bird-Hulstrom clear-sky transmittance (Sahara-clear). Used for
+# the instantaneous calculation so peak matches measured noon DNI.
+ATMOS_TRANSMITTANCE = 0.70
 
-# Diffuse fraction of GHI (sky-diffuse contribution to plane-of-array).
-# Pristine clear-sky upper bound is ~22%, but coastal CA real-world is
-# closer to 10-14%. We use 0.12 — represents typical haze layer.
-DIFFUSE_FRACTION_OF_GHI = 0.12
+# Diffuse fraction of GHI on tilted panels. 0.15 is realistic for coastal CA.
+DIFFUSE_FRACTION_OF_GHI = 0.15
+
+# Fraction of the raw clear-sky daily integral that we typically realize.
+# Captures the marine layer mornings, soiling, the older-MPPT3 string,
+# afternoon haze, etc. — i.e. the losses that are stronger in aggregate
+# than at instantaneous peak. Calibrated so a "great" day comes out at ~85
+# kWh on our 17.6 kW system.
+DAILY_AVAIL_FACTOR = 0.70
 
 # Inverter credentials — sourced from addon options / env / .env file
 INVERTER_CONFIG = {
@@ -1139,23 +1150,22 @@ HTML_TEMPLATE = '''
             margin-top: 7px;
             opacity: 0.7;
         }
+        /* Solid-color bar fills. Color reflects the card's state, not a
+           rainbow gradient. State classes are applied by JS to match the
+           same logic as the card border (PV: % of expected; Home: load
+           magnitude). */
         .performance-bar .fill {
             height: 100%;
-            background: linear-gradient(90deg, #e74c3c, #f39c12, #2ecc71);
-            transition: width 0.5s ease;
+            background: #1abc9c;          /* default solid (used by Home) */
+            transition: width 0.5s ease, background-color 0.3s ease;
         }
-        .performance-bar .fill.battery {
-            background: linear-gradient(90deg, #3498db, #9b59b6);
-        }
-        .performance-bar .fill.grid {
-            background: linear-gradient(90deg, #95a5a6, #2ecc71);
-        }
-        .performance-bar .fill.grid.importing {
-            background: linear-gradient(90deg, #95a5a6, #e74c3c);
-        }
-        .performance-bar .fill.home {
-            background: linear-gradient(90deg, #1abc9c, #e67e22);
-        }
+        /* PV fill — same thresholds as the PV card border */
+        .performance-bar .fill.pv-good { background: #2ecc71; }
+        .performance-bar .fill.pv-warn { background: #e67e22; }
+        .performance-bar .fill.pv-bad  { background: #e74c3c; }
+        /* Home fill — same thresholds as the Home card border */
+        .performance-bar .fill.home-warm { background: #e67e22; }
+        .performance-bar .fill.home-hot  { background: #e74c3c; }
         .mppt-zero .mppt-row {
             display: none;
         }
@@ -2458,7 +2468,9 @@ HTML_TEMPLATE = '''
             }
         }
 
-        // Color-code each top-card's border based on state.
+        // Color-code each top-card's border + bar fill based on state.
+        // Border + fill use the SAME state buckets — fill state is set on
+        // both the now-bar and the daily-bar so they color together.
         //
         //   PV:       green if generating ≥75% of expected, orange 50-75%,
         //             red <50% (only when expected > 1 kW so it's not
@@ -2473,26 +2485,38 @@ HTML_TEMPLATE = '''
                 el.classList.remove('border-green', 'border-orange', 'border-red');
                 if (color) el.classList.add('border-' + color);
             };
+            const setFills = (kind, ...stateClasses) => {
+                // Apply state to both the now-fill and daily-fill of `kind`
+                for (const suffix of ['load-fill', 'daily-fill']) {
+                    const el = document.getElementById(kind + '-' + suffix);
+                    if (!el) continue;
+                    el.classList.remove('pv-good','pv-warn','pv-bad',
+                                        'home-warm','home-hot');
+                    for (const cls of stateClasses) el.classList.add(cls);
+                }
+            };
 
             // PV: ratio of actual to expected. Only color when there's a
             // meaningful expected number (above noise floor).
             let pvColor = null;
+            let pvFillState = 'pv-good';   // default green when no signal
             if (expected_pv_w > 1000) {
                 const ratio = pv_w / expected_pv_w;
-                if      (ratio >= 0.75) pvColor = 'green';
-                else if (ratio >= 0.50) pvColor = 'orange';
-                else                    pvColor = 'red';
+                if      (ratio >= 0.75) { pvColor = 'green';  pvFillState = 'pv-good'; }
+                else if (ratio >= 0.50) { pvColor = 'orange'; pvFillState = 'pv-warn'; }
+                else                    { pvColor = 'red';    pvFillState = 'pv-bad';  }
             }
             setBorder('pv-card', pvColor);
+            setFills('pv', pvFillState);
 
-            // Battery: SOC bands
+            // Battery: SOC bands (border only — daily-bar is bidi, fixed colors)
             let batColor = null;
             if      (soc > 70) batColor = 'green';
             else if (soc < 18) batColor = 'red';
             else if (soc < 30) batColor = 'orange';
             setBorder('battery-card', batColor);
 
-            // Grid: signed power, threshold 50W either direction
+            // Grid: signed power (border only — daily-bar is bidi)
             let gridColor = null;
             if      (grid_w >  50) gridColor = 'green';   // exporting
             else if (grid_w < -50) gridColor = 'red';     // importing
@@ -2500,9 +2524,11 @@ HTML_TEMPLATE = '''
 
             // Home: consumption magnitude bands
             let homeColor = null;
-            if      (home_w > 5000) homeColor = 'red';
-            else if (home_w > 2000) homeColor = 'orange';
+            let homeFillState = null;        // default solid teal
+            if      (home_w > 5000) { homeColor = 'red';    homeFillState = 'home-hot';  }
+            else if (home_w > 2000) { homeColor = 'orange'; homeFillState = 'home-warm'; }
             setBorder('home-card', homeColor);
+            setFills('home', homeFillState);
         }
 
         // Render the schedule timeline. Receives a list of events from
@@ -3682,32 +3708,39 @@ def _ensure_today_cumulative(date):
 
 
 def _expected_daily_kwh_for(date):
-    """Full-day expected kWh — last entry of today's cumulative curve."""
+    """Full-day expected kWh, scaled by DAILY_AVAIL_FACTOR.
+
+    The raw cumulative integral assumes perfect clear-sky all day —
+    realistic for the instantaneous peak but optimistic across a full
+    day's worth of marine layer + haze + occasional clouds. We multiply
+    by DAILY_AVAIL_FACTOR so the daily ceiling represents a typical
+    good day, not the theoretical clear-sky max.
+    """
     cum = _ensure_today_cumulative(date)
-    return (cum[-1] / 1000.0) if cum else 0.0
+    return (cum[-1] / 1000.0 * DAILY_AVAIL_FACTOR) if cum else 0.0
 
 
 def _expected_kwh_so_far(now: datetime) -> float:
     """Expected kWh produced from start-of-day up to `now`, interpolated.
 
-    Used by the dashboard to draw the "where you should be" indicator on
-    the PV daily-bar. PV production is non-linear (peaks at solar noon),
-    so this can't be reduced to a fraction-of-day calculation.
+    Scaled by the same DAILY_AVAIL_FACTOR so it stays comparable to the
+    daily-total reference. The white-tick on the PV daily-bar lines up
+    with the model's expectation of "where you should be by now"
+    against the realistic daily ceiling, not the clear-sky theoretical.
     """
     cum = _ensure_today_cumulative(now.date())
     if not cum:
         return 0.0
-    # Slot index has fractional precision (e.g. 13:15 → 26.5)
     slot_idx_float = (now.hour + now.minute / 60.0) * 2
     if slot_idx_float >= len(cum):
-        return cum[-1] / 1000.0
+        return cum[-1] / 1000.0 * DAILY_AVAIL_FACTOR
     if slot_idx_float <= 0:
         return 0.0
     low = int(slot_idx_float)
     high = min(low + 1, len(cum) - 1)
     frac = slot_idx_float - low
     interp_wh = cum[low] + frac * (cum[high] - cum[low])
-    return interp_wh / 1000.0
+    return interp_wh / 1000.0 * DAILY_AVAIL_FACTOR
 
 
 # Cache today's events for 60s to avoid hammering the inverter API
