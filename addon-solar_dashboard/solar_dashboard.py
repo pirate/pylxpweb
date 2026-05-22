@@ -900,6 +900,33 @@ HTML_TEMPLATE = '''
         .mppt-zero .legend {
             display: none;
         }
+        /* MPPT voltage bar — graphs string voltage from 100V (left) to 350V
+           (right). Color-coded by efficiency zone:
+              < 140V (~ < 16%) red    — below turn-on
+              140-300V (16-80%) yellow — below optimal range
+              300-350V (80-100%) green — entering optimal range */
+        .mppt-voltage-bar-row {
+            padding: 0 0 8px 0;
+        }
+        .mppt-voltage-bar {
+            position: relative;
+            height: 4px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 2px 0 0 0;
+        }
+        .mppt-voltage-bar .fill {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.4s ease, background-color 0.4s ease;
+        }
+        .mppt-voltage-bar .fill.below-turnon { background: #e74c3c; }
+        .mppt-voltage-bar .fill.below-optimal { background: #f39c12; }
+        .mppt-voltage-bar .fill.optimal { background: #2ecc71; }
         .mppt-zero-message {
             display: none;
             color: #888;
@@ -1231,9 +1258,9 @@ HTML_TEMPLATE = '''
             </div>
 
             <div class="section">
-                <div class="section-title"><span class="icon">⚠️</span> Today's Import Events</div>
+                <div class="section-title"><span class="icon">⚠️</span> Import Events (last 24h)</div>
                 <div id="import-events-list">
-                    <div class="event-empty">No imports today ✓</div>
+                    <div class="event-empty">No imports in the last 24h ✓</div>
                 </div>
             </div>
 
@@ -1259,6 +1286,9 @@ HTML_TEMPLATE = '''
                     <span class="stat-label"></span>
                     <span class="stat-value voltage" id="pv1-detail">-- V / -- A</span>
                 </div>
+                <div class="mppt-row mppt-voltage-bar-row">
+                    <div class="mppt-voltage-bar"><div class="fill" id="pv1-voltage-fill"></div></div>
+                </div>
                 <div class="stat-row mppt-row">
                     <span class="stat-label"><span class="mppt-dot ne"></span> MPPT 2 (NE)</span>
                     <span class="stat-value power" id="pv2">-- W</span>
@@ -1267,6 +1297,9 @@ HTML_TEMPLATE = '''
                     <span class="stat-label"></span>
                     <span class="stat-value voltage" id="pv2-detail">-- V / -- A</span>
                 </div>
+                <div class="mppt-row mppt-voltage-bar-row">
+                    <div class="mppt-voltage-bar"><div class="fill" id="pv2-voltage-fill"></div></div>
+                </div>
                 <div class="stat-row mppt-row">
                     <span class="stat-label"><span class="mppt-dot yard"></span> MPPT 3 (Mixed)</span>
                     <span class="stat-value power" id="pv3">-- W</span>
@@ -1274,6 +1307,9 @@ HTML_TEMPLATE = '''
                 <div class="stat-row mppt-row mppt-detail">
                     <span class="stat-label"></span>
                     <span class="stat-value voltage" id="pv3-detail">-- V / -- A</span>
+                </div>
+                <div class="mppt-row mppt-voltage-bar-row">
+                    <div class="mppt-voltage-bar"><div class="fill" id="pv3-voltage-fill"></div></div>
                 </div>
                 <div class="legend">
                     <div class="legend-item"><div class="legend-color ne"></div> <span id="legend-ne">NE Roof</span></div>
@@ -1698,7 +1734,7 @@ HTML_TEMPLATE = '''
                 const listEl = document.getElementById('import-events-list');
                 if (!listEl) return;
                 if (!data.events || data.events.length === 0) {
-                    listEl.innerHTML = '<div class="event-empty">No imports today ✓</div>';
+                    listEl.innerHTML = '<div class="event-empty">No imports in the last 24h ✓</div>';
                     return;
                 }
                 // Render newest first
@@ -2606,17 +2642,35 @@ HTML_TEMPLATE = '''
                         el.classList.add(cls);
                     };
 
+                    // Voltage bar graph: 100V → 0% width, 350V → 100% width.
+                    // Color by zone (red below 140V turn-on, yellow below 300V optimal, green above).
+                    const VBAR_MIN = 100, VBAR_MAX = 350;
+                    const setMpptVoltageBar = (id, v) => {
+                        const fill = document.getElementById(id);
+                        if (!fill) return;
+                        const clamped = Math.max(VBAR_MIN, Math.min(VBAR_MAX, v));
+                        const pct = (clamped - VBAR_MIN) / (VBAR_MAX - VBAR_MIN) * 100;
+                        fill.style.width = pct.toFixed(1) + '%';
+                        fill.classList.remove('below-turnon', 'below-optimal', 'optimal');
+                        if (v > 0 && v < 140)      fill.classList.add('below-turnon');
+                        else if (v > 0 && v < 300) fill.classList.add('below-optimal');
+                        else                       fill.classList.add('optimal');
+                    };
+
                     // MPPT 1
                     document.getElementById('pv1').textContent = formatPower(inv.pv1_power);
                     setMpptDetail('pv1-detail', inv.pv1_voltage, inv.pv1_power);
+                    setMpptVoltageBar('pv1-voltage-fill', inv.pv1_voltage);
 
                     // MPPT 2
                     document.getElementById('pv2').textContent = formatPower(inv.pv2_power);
                     setMpptDetail('pv2-detail', inv.pv2_voltage, inv.pv2_power);
+                    setMpptVoltageBar('pv2-voltage-fill', inv.pv2_voltage);
 
                     // MPPT 3
                     document.getElementById('pv3').textContent = formatPower(inv.pv3_power);
                     setMpptDetail('pv3-detail', inv.pv3_voltage, inv.pv3_power);
+                    setMpptVoltageBar('pv3-voltage-fill', inv.pv3_voltage);
 
                     const allMpptIdle = [inv.pv1_power, inv.pv2_power, inv.pv3_power]
                         .every((power) => numericPower(power) === 0);
@@ -3081,12 +3135,14 @@ def _expected_daily_kwh_for(date):
 _EVENTS_CACHE = {"date": None, "ts": None, "events": []}
 
 
-async def _fetch_today_import_events():
-    """Pull per-4-min pToUser/SOC/ppv chart samples for today and classify
-    each contiguous import event."""
+async def _fetch_recent_import_events():
+    """Pull per-4-min pToUser/SOC/ppv chart samples for the last 24h
+    (today + yesterday's tail) and classify each contiguous import event."""
     from datetime import timedelta as _td
     now = datetime.now(TIMEZONE)
-    today = now.date().isoformat()
+    today = now.date()
+    yesterday = today - _td(days=1)
+    cutoff = now - _td(hours=24)
 
     inverter = _inverter_cache.get("inverter")
     if not inverter:
@@ -3096,24 +3152,49 @@ async def _fetch_today_import_events():
     if not client:
         return []
 
+    # Fetch both days in parallel — yesterday gives us last night, today
+    # gives us anything in the morning to now.
     try:
-        ptouser, soc, ppv = await asyncio.gather(
-            client.analytics.get_chart_data(serial, "pToUser", today),
-            client.analytics.get_chart_data(serial, "soc", today),
-            client.analytics.get_chart_data(serial, "ppv", today),
+        results = await asyncio.gather(
+            client.analytics.get_chart_data(serial, "pToUser", yesterday.isoformat()),
+            client.analytics.get_chart_data(serial, "soc",     yesterday.isoformat()),
+            client.analytics.get_chart_data(serial, "ppv",     yesterday.isoformat()),
+            client.analytics.get_chart_data(serial, "pToUser", today.isoformat()),
+            client.analytics.get_chart_data(serial, "soc",     today.isoformat()),
+            client.analytics.get_chart_data(serial, "ppv",     today.isoformat()),
         )
     except Exception as e:
         print(f"events fetch error: {e}", flush=True)
         return []
 
-    # Build lookups for SOC and PV at each sample timestamp
-    soc_lookup = {s.get("time"): s.get("value") for s in soc.get("data", []) if "time" in s}
-    ppv_lookup = {s.get("time"): s.get("value") for s in ppv.get("data", []) if "time" in s}
+    ptouser_y, soc_y, ppv_y, ptouser_t, soc_t, ppv_t = results
+
+    # Merge both days' samples
+    ptouser_all = (ptouser_y.get("data", []) or []) + (ptouser_t.get("data", []) or [])
+    soc_lookup = {}
+    for src in (soc_y.get("data", []) or []) + (soc_t.get("data", []) or []):
+        if "time" in src:
+            soc_lookup[src["time"]] = src.get("value")
+    ppv_lookup = {}
+    for src in (ppv_y.get("data", []) or []) + (ppv_t.get("data", []) or []):
+        if "time" in src:
+            ppv_lookup[src["time"]] = src.get("value")
+
+    # Filter to last 24h only (drop samples older than the cutoff)
+    def _in_window(s):
+        try:
+            ts = datetime.strptime(s.get("time", ""), "%Y-%m-%d %H:%M:%S")
+            ts = ts.replace(tzinfo=TIMEZONE)
+            return ts >= cutoff
+        except (ValueError, TypeError):
+            return False
+
+    ptouser_window = [s for s in ptouser_all if _in_window(s)]
 
     # Group consecutive non-zero pToUser samples into events
     events_raw = []
     cur = None
-    for s in ptouser.get("data", []):
+    for s in ptouser_window:
         v = s.get("value") or 0
         t = s.get("time")
         if not t:
@@ -3155,9 +3236,12 @@ async def _fetch_today_import_events():
             soc=soc_at,
             ppv=ppv_at,
         )
+        # Show date in time field if event is from yesterday
+        date_prefix = "" if ts_start.date() == datetime.now(TIMEZONE).date() \
+                        else ts_start.strftime("%a ")
         out.append({
-            "start": ts_start.strftime("%H:%M"),
-            "end": ts_end.strftime("%H:%M"),
+            "start": date_prefix + ts_start.strftime("%H:%M"),
+            "end":   date_prefix + ts_end.strftime("%H:%M"),
             "duration_min": round(dur_min, 1),
             "peak_w": int(peak_w),
             "kwh": round(kwh, 3),
@@ -3166,6 +3250,10 @@ async def _fetch_today_import_events():
             "reason": reason,
         })
     return out
+
+
+# Backwards-compatible alias (old name)
+_fetch_today_import_events = _fetch_recent_import_events
 
 
 def _classify_import_event(*, hour, dur_min, peak_w, avg_w, soc, ppv):
