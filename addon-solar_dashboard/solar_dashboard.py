@@ -939,8 +939,7 @@ HTML_TEMPLATE = '''
         .performance-bar .fill.grid.importing {
             background: linear-gradient(90deg, #95a5a6, #e74c3c);
         }
-        .mppt-zero .mppt-row,
-        .mppt-zero .legend {
+        .mppt-zero .mppt-row {
             display: none;
         }
         /* MPPT voltage bar — graphs string voltage from 100V (left) to 350V
@@ -1192,27 +1191,6 @@ HTML_TEMPLATE = '''
             transform: translate(-50%, -50%);
             color: #888;
         }
-        .legend {
-            display: flex;
-            gap: 20px;
-            justify-content: center;
-            margin-top: 10px;
-            font-size: 0.8em;
-        }
-        .legend-item {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        .legend-color {
-            width: 12px;
-            height: 12px;
-            border-radius: 2px;
-        }
-        .legend-color.sw { background: #3498db; }
-        .legend-color.ne { background: #9b59b6; }
-        .legend-color.yard { background: #27ae60; }
-
         /* Inline color dots next to MPPT labels */
         .mppt-dot {
             display: inline-block;
@@ -1330,11 +1308,6 @@ HTML_TEMPLATE = '''
                 </div>
                 <div class="mppt-row mppt-voltage-bar-row">
                     <div class="mppt-voltage-bar"><div class="fill" id="pv3-voltage-fill"></div></div>
-                </div>
-                <div class="legend">
-                    <div class="legend-item"><div class="legend-color ne"></div> <span id="legend-ne">NE Roof</span></div>
-                    <div class="legend-item"><div class="legend-color sw"></div> <span id="legend-sw">SW Roof</span></div>
-                    <div class="legend-item"><div class="legend-color yard"></div> <span id="legend-yard">Older Mixed</span></div>
                 </div>
             </div>
 
@@ -1734,9 +1707,6 @@ HTML_TEMPLATE = '''
                 }
             }
 
-            // The following always runs, even if 3D init failed above
-            try { updateLegendFromConfig(); } catch (e) { /* ignore */ }
-
             // Start data polling — this is what makes the side panel show numbers
             fetchData();
             setInterval(fetchData, 5000);
@@ -1772,19 +1742,6 @@ HTML_TEMPLATE = '''
             } catch (err) {
                 console.error('events fetch failed:', err);
             }
-        }
-
-        function updateLegendFromConfig() {
-            const swArray = getArrayConfig('SW') || CONFIG.arrays[1];
-            const neArray = getArrayConfig('NE') || CONFIG.arrays[0];
-            const mixedArray = getArrayConfig('Older') || getArrayConfig('Mixed') || CONFIG.arrays[2];
-
-            // Format azimuth(s): single value or list (split arrays)
-            const fmtAz = (a) => Array.isArray(a) ? a.map(v => v + '°').join(' / ') : a + '°';
-
-            document.getElementById('legend-sw').textContent = `SW Roof (${fmtAz(swArray.azimuth)})`;
-            document.getElementById('legend-ne').textContent = `NE Roof (${fmtAz(neArray.azimuth)})`;
-            document.getElementById('legend-yard').textContent = `Older Mixed (${fmtAz(mixedArray.azimuth)})`;
         }
 
         function createRoad() {
