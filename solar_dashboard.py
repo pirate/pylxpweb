@@ -394,6 +394,41 @@ def calculate_panel_irradiance(sun_alt: float, sun_az: float, panel_tilt: float,
     return direct + diffuse
 
 
+# --- Module-side corrections applied to the clear-sky panel-output model ----
+
+# Si-PV temperature coefficient. Datasheet typical = -0.4%/°C above STC (25°C).
+# Cell temp estimated from NOCT model: T_cell = T_ambient + (NOCT-20) * G/800.
+# We don't have an outdoor temp sensor, so we use a fixed ambient assumption
+# that's roughly right for our coastal CA climate. This costs us accuracy on
+# very hot or very cold days but the structure is here to plug in real
+# ambient data later (Open-Meteo or HA weather entity).
+PV_TEMP_COEFF_PCT_PER_C = -0.40
+ASSUMED_AMBIENT_TEMP_C = 22.0      # mild coastal CA default
+PANEL_NOCT_C = 45.0                # typical for residential Si modules
+STC_TEMP_C = 25.0
+
+
+def pv_temperature_derate(irradiance_w_per_m2: float, ambient_c: float = ASSUMED_AMBIENT_TEMP_C) -> float:
+    """Multiplier (0..1) representing power loss due to panel heating.
+
+    NOCT model: T_cell = T_ambient + (NOCT-20) × G/800 W/m².
+    At 1000 W/m² on a 22 °C day, panels reach ~53 °C → 0.4%/°C × 28 °C ≈ 11%
+    loss versus the clear-sky DNI value.
+    """
+    if irradiance_w_per_m2 <= 0:
+        return 1.0
+    t_cell = ambient_c + (PANEL_NOCT_C - 20) * irradiance_w_per_m2 / 800.0
+    delta = t_cell - STC_TEMP_C
+    return max(0.5, 1.0 + delta * PV_TEMP_COEFF_PCT_PER_C / 100.0)
+
+
+# Cloud-cover factor. We don't currently hit a weather API. Set to 1.0
+# (perfectly clear-sky) by default. Override in compute_expected_power if a
+# weather source is plugged in later — e.g. fetch open-meteo "cloud_cover_low"
+# and map 0%→1.0, 100%→~0.15.
+DEFAULT_CLOUD_FACTOR = 1.0
+
+
 # =============================================================================
 # INVERTER DATA FETCHING
 # =============================================================================
@@ -515,10 +550,10 @@ def _build_schedule_timeline(now: datetime) -> list[dict]:
     """Build a chronological list of schedule events covering ~next 24h.
 
     Currently the only ACTIVE scheduled window is Forced Discharge (peak
-    export). Everything else (forced charge, AC charge, BAT_FIRST slots,
-    peak shaving) is either disabled or has no time window. So the
-    timeline alternates between "Forced Discharge" and "self-consumption"
-    (the default fallback when no schedule is running).
+    export). Outside of that window the inverter runs in whatever mode
+    its top-level mode flags select — for our system that's "PV Charge
+    Priority" (FUNC_LSP_CHARGE_PRIORITY_EN=True,
+    FUNC_LSP_SELF_CONSUMPTION_EN=False).
 
     Returns a list of dicts:
       {start_h, end_h, label, detail, kind, active}
@@ -558,6 +593,8 @@ def _build_schedule_timeline(now: datetime) -> list[dict]:
 
     fd_detail = (f"{FORCED_DISCHARGE_POWER_KW} kW target · ≥{FORCED_DISCHARGE_SOC_FLOOR}% "
                  f"SOC floor")
+    idle_label  = "PV Charge Priority"
+    idle_detail = f"PV → battery (charge to {SYSTEM_CHARGE_SOC_LIMIT}%) → grid"
 
     def _fmt(h):
         # Wrap around (h could be > 23.999 for next-day events)
@@ -578,8 +615,8 @@ def _build_schedule_timeline(now: datetime) -> list[dict]:
         out.append({
             "start": _fmt(e["start_h"]),
             "end":   _fmt(e["end_h"]),
-            "label": "Forced Discharge" if kind == "forced_discharge" else "self-consumption",
-            "detail": fd_detail if kind == "forced_discharge" else "PV → load → battery (95% cap)",
+            "label": "Forced Discharge" if kind == "forced_discharge" else idle_label,
+            "detail": fd_detail if kind == "forced_discharge" else idle_detail,
             "kind":   kind,
             "active": is_active,
         })
@@ -1459,14 +1496,14 @@ HTML_TEMPLATE = '''
                     </div>
                     <div class="power-card-meta">
                         <span id="pv-load-text">--%</span>
-                        <span>of 12 kW now</span>
+                        <span id="pv-load-target">of -- kW expected</span>
                     </div>
                     <div class="performance-bar daily-bar">
                         <div class="fill" id="pv-daily-fill" style="width: 0%"></div>
                     </div>
                     <div class="power-card-meta daily-meta">
                         <span id="pv-daily-text" style="color:#f39c12;">--</span>
-                        <span class="meta-suffix" id="pv-daily-target">of -- max</span>
+                        <span class="meta-suffix" id="pv-daily-target">of -- kWh expected</span>
                     </div>
                 </div>
                 <div class="power-card" id="battery-card">
@@ -2363,9 +2400,13 @@ HTML_TEMPLATE = '''
             return (value > 0 ? '+' : '') + value.toLocaleString() + 'W';
         }
 
-        function updatePowerLoadCard(kind, watts) {
+        function updatePowerLoadCard(kind, watts, maxWOverride) {
             const value = numericPower(watts);
-            const maxW = (kind === 'home') ? HOME_LOAD_MAX_W : POWER_LOAD_MAX_W;
+            // PV uses the model-derived expected_power as its denominator
+            // (passed in via maxWOverride); other cards use static maxes.
+            const maxW = (maxWOverride != null && maxWOverride > 0)
+                ? maxWOverride
+                : ((kind === 'home') ? HOME_LOAD_MAX_W : POWER_LOAD_MAX_W);
             const loadPercent = Math.min(100, Math.abs(value) / maxW * 100);
             const valueElId = (kind === 'battery') ? 'battery-top-power'
                             : (kind === 'grid')    ? 'grid-top-power'
@@ -2997,12 +3038,21 @@ HTML_TEMPLATE = '''
                 if (data.inverter) {
                     const inv = data.inverter;
                     const pvPower = numericPower(inv.pv_total_power);
+                    const expectedPower = numericPower(data.expected_power);
                     const battPower = numericPower(inv.battery_charge_power) - numericPower(inv.battery_discharge_power);
                     // Net grid: + = exporting to grid, - = importing from grid
                     const gridPower = numericPower(inv.power_to_grid) - numericPower(inv.power_to_user);
-                    updatePowerLoadCard('pv', pvPower);
+                    // PV bar is "% of expected at this instant" — uses the
+                    // model-derived expected_power as its denominator.
+                    updatePowerLoadCard('pv', pvPower, expectedPower);
                     updatePowerLoadCard('battery', battPower);
                     updatePowerLoadCard('grid', gridPower);
+
+                    // PV now-bar label: "of {N} kW expected @ HH:MM"
+                    const nowHm = formatHM12(new Date().getHours(), new Date().getMinutes());
+                    const expectedKw = (expectedPower / 1000).toFixed(1);
+                    document.getElementById('pv-load-target').textContent =
+                        `of ${expectedKw} kW expected @ ${nowHm}`;
 
                     // MPPT optimal voltage range for FlexBOSS21 — outside this range
                     // the MPPT efficiency drops noticeably. Color-code voltages so
@@ -3130,10 +3180,10 @@ HTML_TEMPLATE = '''
                         document.getElementById(kind + '-daily-fill').style.width = pct.toFixed(1) + '%';
                         document.getElementById(kind + '-daily-text').textContent = label;
                     };
-                    setDailySingle('pv',   yld,   expectedDaily, `${yld.toFixed(1)} kWh today`);
+                    setDailySingle('pv',   yld,   expectedDaily, `${yld.toFixed(1)} kWh generated`);
                     setDailySingle('home', usage, homeBudget,    `${usage.toFixed(1)} kWh`);
                     document.getElementById('pv-daily-target').textContent =
-                        `of ${expectedDaily.toFixed(0)} max`;
+                        `of ${expectedDaily.toFixed(0)} kWh expected`;
                     document.getElementById('home-daily-target').textContent =
                         `of ${homeBudget.toFixed(0)} kWh`;
 
@@ -3495,8 +3545,13 @@ def get_data():
                 sun_pos["altitude"], sun_pos["azimuth"],
                 array["tilt"], array["azimuth"], dni,
             )
-        # Convert irradiance to power: capacity * (irradiance/1000) * efficiency
-        array_power = array["capacity_kw"] * 1000 * (irradiance / 1000) * SYSTEM_EFFICIENCY
+        # Cell heating derate (depends on per-array plane-of-array irradiance)
+        # + cloud cover (currently 1.0 — extend with weather API later).
+        temp_factor  = pv_temperature_derate(irradiance)
+        cloud_factor = DEFAULT_CLOUD_FACTOR
+        # Convert irradiance to power: capacity * (G/1000) * system_eff * temp * cloud
+        array_power = (array["capacity_kw"] * 1000 * (irradiance / 1000)
+                       * SYSTEM_EFFICIENCY * temp_factor * cloud_factor)
         expected_power += array_power
 
     # Get inverter data (cached or fresh)
@@ -3567,7 +3622,13 @@ def _expected_daily_kwh_for(date):
                     irr = calculate_panel_irradiance(
                         pos["altitude"], pos["azimuth"],
                         array["tilt"], array["azimuth"], dni)
-                slot_power_w += array["capacity_kw"] * 1000 * (irr / 1000) * SYSTEM_EFFICIENCY
+                # Match the per-instant model: include temp derate + cloud
+                # factor so the daily-kWh ceiling is comparable to the live
+                # expected_power number.
+                temp_factor  = pv_temperature_derate(irr)
+                cloud_factor = DEFAULT_CLOUD_FACTOR
+                slot_power_w += (array["capacity_kw"] * 1000 * (irr / 1000)
+                                 * SYSTEM_EFFICIENCY * temp_factor * cloud_factor)
             total_wh += slot_power_w * 0.5  # 30-min slot
 
     cache["date"] = iso
