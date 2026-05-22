@@ -796,9 +796,12 @@ HTML_TEMPLATE = '''
         .power-summary {
             display: grid;
             /* 4 cards side-by-side on full-width kiosk, collapses to 2x2 on
-               narrow viewports (each card has a 180px floor). */
+               narrow viewports (each card has a 180px floor).
+               gap: 0 — the per-card 3px border (matching page bg) provides
+               the visual separation AND doubles as a color-coded state
+               indicator (see .power-card.border-* below). */
             grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 6px;
+            gap: 0;
             padding: 0;
             background: transparent;
         }
@@ -831,7 +834,17 @@ HTML_TEMPLATE = '''
             background: rgba(255,255,255,0.05);
             border-radius: 10px;
             padding: 10px 8px;
+            /* 3px border doubles as state indicator. Default matches the
+               panel background (#0a0a14-ish via rgba(0,0,0,0.7) over the
+               body gradient) so the cards appear "padded" by black. JS
+               adds .border-green / -orange / -red based on the card's
+               state (see updateCardBorders in fetchData). */
+            border: 3px solid #000;
+            transition: border-color 0.4s ease;
         }
+        .power-card.border-green  { border-color: #2ecc71; }
+        .power-card.border-orange { border-color: #e67e22; }
+        .power-card.border-red    { border-color: #e74c3c; }
         .power-card .label {
             color: #888;
             font-size: 0.62em;
@@ -852,15 +865,24 @@ HTML_TEMPLATE = '''
             letter-spacing: 0.02em;
             white-space: nowrap;
         }
+        /* Sun + moon icons next to sunrise/sunset times. The unicode glyphs
+           ☀ ☾ render as text so we can colorize them via CSS. */
+        .sun-times .sun-icon  { color: #f1c40f; font-size: 1.15em; }
+        .sun-times .moon-icon { color: #5d6d9c; font-size: 1.15em; }
         /* Battery upper-right SOC · V · A — all three bold for legibility */
         .card-meta-tag.battery-tag {
             font-weight: 700;
             color: #ddd;
         }
-        /* Sign-colored battery current: green when charging, blue when discharging */
+        /* Sign-colored battery current: green when charging, blue when discharging.
+           Wiring-temperature warning rules override the direction color:
+              |amps| > 170A → orange (heads up)
+              |amps| > 180A → red    (check wiring) */
         .card-meta-tag.battery-tag #battery-current.charging    { color: #2ecc71; }
         .card-meta-tag.battery-tag #battery-current.discharging { color: #3498db; }
         .card-meta-tag.battery-tag #battery-current.idle        { color: #888; }
+        .card-meta-tag.battery-tag #battery-current.warn-warm { color: #e67e22; }
+        .card-meta-tag.battery-tag #battery-current.warn-hot  { color: #e74c3c; }
         .power-card .value {
             margin-top: 6px;
             font-size: 2.1em;
@@ -1062,8 +1084,13 @@ HTML_TEMPLATE = '''
             gap: 4px;
             font-variant-numeric: tabular-nums;
         }
-        .nem-rates .rate-import { color: #e74c3c; font-weight: 600; }
-        .nem-rates .rate-export { color: #2ecc71; font-weight: 600; }
+        /* The "active" side (whichever direction grid power is flowing) is
+           bold; the inactive side stays the same color but lighter weight.
+           JS toggles .active on whichever side is currently relevant. */
+        .nem-rates .rate-import { color: #e74c3c; font-weight: 400; opacity: 0.7; }
+        .nem-rates .rate-export { color: #2ecc71; font-weight: 400; opacity: 0.7; }
+        .nem-rates .rate-import.active,
+        .nem-rates .rate-export.active { font-weight: 700; opacity: 1; }
         .nem-rates .rate-arrow-in  { color: #e74c3c; font-size: 0.85em; opacity: 0.85; }
         .nem-rates .rate-arrow-out { color: #2ecc71; font-size: 0.85em; opacity: 0.85; }
         .nem-rates .rate-ava-bonus {
@@ -1308,12 +1335,12 @@ HTML_TEMPLATE = '''
         </div>
         <div id="stats-panel">
             <div class="section power-summary">
-                <div class="power-card">
+                <div class="power-card" id="pv-card">
                     <div class="power-card-header">
                         <div class="label">PV Power</div>
                         <div class="sun-times">
-                            ↑<span id="sunrise">--:--</span>
-                            &nbsp;↓<span id="sunset">--:--</span>
+                            <span class="sun-icon">☀</span><span id="sunrise">--:--</span>
+                            &nbsp;<span class="moon-icon">☾</span><span id="sunset">--:--</span>
                         </div>
                     </div>
                     <div class="value pv" id="total-pv">--</div>
@@ -1332,7 +1359,7 @@ HTML_TEMPLATE = '''
                         <span class="meta-suffix" id="pv-daily-target">of -- max</span>
                     </div>
                 </div>
-                <div class="power-card">
+                <div class="power-card" id="battery-card">
                     <div class="power-card-header">
                         <div class="label">Battery</div>
                         <div class="card-meta-tag battery-tag">
@@ -1359,7 +1386,7 @@ HTML_TEMPLATE = '''
                         <span class="meta-right" id="battery-daily-charged">-- kWh<span class="meta-suffix">in</span></span>
                     </div>
                 </div>
-                <div class="power-card">
+                <div class="power-card" id="grid-card">
                     <div class="power-card-header">
                         <div class="label">Grid</div>
                         <div class="card-meta-tag">
@@ -1384,7 +1411,7 @@ HTML_TEMPLATE = '''
                         <span class="meta-right" id="grid-daily-exported">-- kWh<span class="meta-suffix">exp</span></span>
                     </div>
                 </div>
-                <div class="power-card">
+                <div class="power-card" id="home-card">
                     <div class="label">Home</div>
                     <div class="value home idle" id="home-top-power">--</div>
                     <div class="performance-bar">
@@ -2276,6 +2303,53 @@ HTML_TEMPLATE = '''
             }
         }
 
+        // Color-code each top-card's border based on state.
+        //
+        //   PV:       green if generating ≥75% of expected, orange 50-75%,
+        //             red <50% (only when expected > 1 kW so it's not
+        //             gating on noise around dawn/dusk).
+        //   Battery:  by SOC. ≥70% green, <30% orange, <18% red.
+        //   Grid:     by current flow. import>50W red, export>50W green.
+        //   Home:     by current consumption. >5 kW red, >2 kW orange.
+        function updateCardBorders({pv_w, expected_pv_w, soc, amps, grid_w, home_w}) {
+            const setBorder = (id, color) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.classList.remove('border-green', 'border-orange', 'border-red');
+                if (color) el.classList.add('border-' + color);
+            };
+
+            // PV: ratio of actual to expected. Only color when there's a
+            // meaningful expected number (above noise floor).
+            let pvColor = null;
+            if (expected_pv_w > 1000) {
+                const ratio = pv_w / expected_pv_w;
+                if      (ratio >= 0.75) pvColor = 'green';
+                else if (ratio >= 0.50) pvColor = 'orange';
+                else                    pvColor = 'red';
+            }
+            setBorder('pv-card', pvColor);
+
+            // Battery: SOC bands
+            let batColor = null;
+            if      (soc > 70) batColor = 'green';
+            else if (soc < 18) batColor = 'red';
+            else if (soc < 30) batColor = 'orange';
+            setBorder('battery-card', batColor);
+
+            // Grid: signed power, threshold 50W either direction
+            let gridColor = null;
+            if      (grid_w >  50) gridColor = 'green';   // exporting
+            else if (grid_w < -50) gridColor = 'red';     // importing
+            setBorder('grid-card', gridColor);
+
+            // Home: consumption magnitude bands
+            let homeColor = null;
+            if      (home_w > 5000) homeColor = 'red';
+            else if (home_w > 2000) homeColor = 'orange';
+            setBorder('home-card', homeColor);
+        }
+
         function createGridService() {
             // SERVICE DROP ON SOUTHERN CORNER
             // Calculate positions relative to house from config
@@ -2874,9 +2948,14 @@ HTML_TEMPLATE = '''
                         ? '0A'
                         : (amps > 0 ? '+' : '−') + Math.abs(amps).toFixed(0) + 'A';
                     ampsEl.textContent = ampsStr;
-                    ampsEl.classList.toggle('charging',    amps > 0.5);
-                    ampsEl.classList.toggle('discharging', amps < -0.5);
-                    ampsEl.classList.toggle('idle',        Math.abs(amps) <= 0.5);
+                    // Reset all current-state classes before applying new ones
+                    ampsEl.classList.remove('charging','discharging','idle','warn-warm','warn-hot');
+                    const absAmps = Math.abs(amps);
+                    if      (absAmps > 180) ampsEl.classList.add('warn-hot');     // wiring check!
+                    else if (absAmps > 170) ampsEl.classList.add('warn-warm');    // heads up
+                    else if (amps >  0.5)   ampsEl.classList.add('charging');
+                    else if (amps < -0.5)   ampsEl.classList.add('discharging');
+                    else                    ampsEl.classList.add('idle');
 
                     // Upper-right on Grid card (temperature only — frequency and
                     // BMS amperage and inverter output power are intentionally not
@@ -2889,6 +2968,16 @@ HTML_TEMPLATE = '''
                     // NEW Home card — consumption_power is whole-house load
                     const homePower = numericPower(inv.consumption_power);
                     updatePowerLoadCard('home', homePower);
+
+                    // Color-code the top-card borders based on state.
+                    updateCardBorders({
+                        pv_w: pvPower,
+                        expected_pv_w: numericPower(data.expected_power),
+                        soc: numericPower(inv.battery_soc),
+                        amps: amps,
+                        grid_w: gridPower,           // signed: + export, − import
+                        home_w: homePower,
+                    });
 
                     // Daily-totals bars under each power card.
                     //   PV:      generated kWh        / expected_daily_kwh
@@ -2979,9 +3068,19 @@ HTML_TEMPLATE = '''
                         if (sch.in_ava_bonus) {
                             exportHtml += ' <span class="rate-ava-bonus">+Ava</span>';
                         }
-                        document.getElementById('export-rate-now').innerHTML = exportHtml;
-                        document.getElementById('import-rate-now').textContent =
-                            '$' + importRate.toFixed(3);
+                        const expEl = document.getElementById('export-rate-now');
+                        const impEl = document.getElementById('import-rate-now');
+                        expEl.innerHTML = exportHtml;
+                        impEl.textContent = '$' + importRate.toFixed(3);
+                        // Bold whichever side reflects the current grid flow.
+                        // Threshold matches HOLD_EXPORT_LOCK_POWER (10 W) so the
+                        // active side flips at the same point the inverter does.
+                        if (data.inverter) {
+                            const exportingW = numericPower(data.inverter.power_to_grid);
+                            const importingW = numericPower(data.inverter.power_to_user);
+                            expEl.classList.toggle('active', exportingW > 10);
+                            impEl.classList.toggle('active', importingW > 10);
+                        }
                     }
 
                     const dph = sch.dollars_per_hour_est;
