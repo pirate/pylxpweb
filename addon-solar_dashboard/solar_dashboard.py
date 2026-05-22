@@ -1046,6 +1046,23 @@ HTML_TEMPLATE = '''
             height: 280px;
             margin-top: 4px;
         }
+        /* Combined import/export rate display: "$0.380 ⬅  ➡ $0.025" */
+        .nem-rates {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-variant-numeric: tabular-nums;
+        }
+        .nem-rates .rate-import { color: #e74c3c; font-weight: 600; }
+        .nem-rates .rate-export { color: #2ecc71; font-weight: 600; }
+        .nem-rates .rate-arrow-in  { color: #e74c3c; font-size: 0.85em; opacity: 0.85; }
+        .nem-rates .rate-arrow-out { color: #2ecc71; font-size: 0.85em; opacity: 0.85; }
+        .nem-rates .rate-ava-bonus {
+            color: #2ecc71;
+            font-size: 0.72em;
+            font-weight: 600;
+            margin-left: 6px;
+        }
         .last-update {
             text-align: center;
             color: #666;
@@ -1422,7 +1439,6 @@ HTML_TEMPLATE = '''
             <div class="two-col-row">
 
             <div class="section">
-                <div class="section-title"><span class="icon">⚙️</span> Mode</div>
                 <div class="stat-row">
                     <span class="stat-label">Operation</span>
                     <span class="stat-value">
@@ -1439,25 +1455,21 @@ HTML_TEMPLATE = '''
                     <span class="stat-label">Schedule</span>
                     <span class="stat-value" id="schedule-window">16:00 – 21:00</span>
                 </div>
-                <div class="stat-row">
-                    <span class="stat-label">Discharge Floor</span>
-                    <span class="stat-value" id="discharge-floor">40 %</span>
-                </div>
             </div>
 
             <div class="section">
-                <div class="section-title"><span class="icon">💰</span> Rates</div>
                 <div class="stat-row">
                     <span class="stat-label">PG&amp;E Period</span>
                     <span class="stat-value" id="tou-period">--</span>
                 </div>
                 <div class="stat-row">
-                    <span class="stat-label">Export rate now</span>
-                    <span class="stat-value" id="export-rate-now">--</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Import rate now</span>
-                    <span class="stat-value" id="import-rate-now">--</span>
+                    <span class="stat-label">NEM Rates</span>
+                    <span class="stat-value nem-rates">
+                        <span class="rate-import" id="import-rate-now">--</span>
+                        <span class="rate-arrow-in">⬅</span>
+                        <span class="rate-arrow-out">➡</span>
+                        <span class="rate-export" id="export-rate-now">--</span>
+                    </span>
                 </div>
                 <div class="stat-row">
                     <span class="stat-label">$/hr (estimate)</span>
@@ -1469,7 +1481,6 @@ HTML_TEMPLATE = '''
 
             <!-- 24h history chart: PV / Battery SOC / Grid in+out / Home -->
             <div class="section">
-                <div class="section-title"><span class="icon">📈</span> Last 24 hours</div>
                 <div class="history-chart-wrap">
                     <canvas id="history-chart"></canvas>
                 </div>
@@ -2879,21 +2890,21 @@ HTML_TEMPLATE = '''
                         const w = sch.config.forced_discharge_window;
                         document.getElementById('schedule-window').textContent =
                             String(w[0]).padStart(2,'0') + ':00 – ' + String(w[1]).padStart(2,'0') + ':00';
-                        document.getElementById('discharge-floor').textContent =
-                            sch.config.forced_discharge_soc_floor + ' %';
                     }
 
                     if (sch.rates) {
-                        // Show export rate, append a small "+Ava" badge when the
+                        // Both rates: 3 decimals, no $/kWh suffix (label conveys it).
+                        // Append a small "+Ava" badge to the export rate when the
                         // Ava community-energy peak-export bonus is active.
                         const exportRate = sch.rates.currently_active_export_rate;
-                        let exportText = '$' + exportRate.toFixed(3) + '/kWh';
+                        const importRate = sch.rates.currently_active_import_rate;
+                        let exportHtml = '$' + exportRate.toFixed(3);
                         if (sch.in_ava_bonus) {
-                            exportText += ' <span style="color:#2ecc71;font-size:0.82em;font-weight:600;">+Ava bonus</span>';
+                            exportHtml += ' <span class="rate-ava-bonus">+Ava</span>';
                         }
-                        document.getElementById('export-rate-now').innerHTML = exportText;
+                        document.getElementById('export-rate-now').innerHTML = exportHtml;
                         document.getElementById('import-rate-now').textContent =
-                            '$' + sch.rates.currently_active_import_rate.toFixed(2) + '/kWh';
+                            '$' + importRate.toFixed(3);
                     }
 
                     const dph = sch.dollars_per_hour_est;
