@@ -2714,7 +2714,7 @@ HTML_TEMPLATE = '''
         //   Battery:  by SOC. ≥70% green, <30% orange, <18% red.
         //   Grid:     by current flow. import>50W red, export>50W green.
         //   Home:     by current consumption. >5 kW red, >2 kW orange.
-        function updateCardBorders({pv_w, expected_pv_w, soc, amps, grid_w, home_w}) {
+        function updateCardBorders({pv_w, expected_pv_w, soc, amps, battery_w, grid_w, home_w}) {
             const setBorder = (id, color) => {
                 const el = document.getElementById(id);
                 if (!el) return;
@@ -2745,11 +2745,18 @@ HTML_TEMPLATE = '''
             setBorder('pv-card', pvColor);
             setFills('pv', pvFillState);
 
-            // Battery: SOC bands (border only — daily-bar is bidi, fixed colors)
+            // Battery: SOC bands (border only — daily-bar is bidi, fixed
+            // colors). Only emphasize state when the battery is actively
+            // in use (|power| ≥ 50W). When idle the border stays black
+            // unless SOC is critically low — at <18% the red border
+            // remains as a persistent warning regardless of activity.
             let batColor = null;
-            if      (soc > 70) batColor = 'green';
-            else if (soc < 18) batColor = 'red';
-            else if (soc < 30) batColor = 'orange';
+            const batteryActive = Math.abs(numericPower(battery_w) || 0) >= 50;
+            if      (soc < 18)             batColor = 'red';     // always-on critical warning
+            else if (batteryActive) {
+                if      (soc > 70)         batColor = 'green';
+                else if (soc < 30)         batColor = 'orange';
+            }
             setBorder('battery-card', batColor);
 
             // Grid: signed power (border only — daily-bar is bidi)
@@ -3409,6 +3416,7 @@ HTML_TEMPLATE = '''
                         expected_pv_w: numericPower(data.expected_power),
                         soc: numericPower(inv.battery_soc),
                         amps: amps,
+                        battery_w: battPower,        // signed: + charge, − discharge
                         grid_w: gridPower,           // signed: + export, − import
                         home_w: homePower,
                     });
