@@ -86,30 +86,34 @@ HOUSE = {
 # - "ground" arrays: need position_ft, size_ft, height_ft
 SOLAR_ARRAYS = [
     {
-        # Hardware: 14 × 550 W panels = 7.7 kW nameplate. MPPT1 input wired to
-        # the NE roof (verified visually 2026-05-22 — labels were flipped before).
-        "name": "NE Roof (MPPT1)",
-        "type": "roof",
-        "azimuth": 37.0,
-        "tilt": 10.0,
-        "capacity_kw": 7.7,
-        "vmp_typical": 245,       # observed string Vmp at peak — sub-optimal
-        "panel_count": 14,
-        "panel_layout": [7, 2],
-        "color": 0x9b59b6,        # Purple
-    },
-    {
-        # Hardware: 14 × 550 W panels = 7.7 kW nameplate. MPPT2 input wired to
-        # the SW roof. Newer panels, minimal degradation expected.
-        "name": "SW Roof (MPPT2)",
+        # 14 × 550 W = 7.7 kW nameplate. Measured peak from inverter chart
+        # data on best-5 May days: 4.7-4.8 kW. effective_peak_kw is the
+        # array's max output normalized to POA=1000 W/m²; at solar noon
+        # the model's POA on this 10° SW-facing array is ~966 W/m², so
+        # effective_peak ÷ 1000 × POA gives the actual modeled peak.
+        # Set ~5% above measured max so the model stays a true upper
+        # bound — actual production should never exceed it.
+        "name": "SW Roof (MPPT1)",
         "type": "roof",
         "azimuth": 217.0,
         "tilt": 10.0,
+        "effective_peak_kw": 5.2,
         "capacity_kw": 7.7,
-        "vmp_typical": 256,       # observed string Vmp at peak — sub-optimal
         "panel_count": 14,
         "panel_layout": [7, 2],
-        "color": 0x3498db,        # Blue
+        "color": 0x3498db,
+    },
+    {
+        # 7.7 kW nameplate, measured peak 4.5-4.6 kW (NE peaks in morning).
+        "name": "NE Roof (MPPT2)",
+        "type": "roof",
+        "azimuth": 37.0,
+        "tilt": 10.0,
+        "effective_peak_kw": 5.2,
+        "capacity_kw": 7.7,
+        "panel_count": 14,
+        "panel_layout": [7, 2],
+        "color": 0x9b59b6,
     },
     {
         # MPPT3 is an older/less-efficient set of panels physically distributed
@@ -128,8 +132,10 @@ SOLAR_ARRAYS = [
         "azimuth": [37.0, 217.0],   # 5 on NE face, 5 on SW face
         "fractions": [0.5, 0.5],    # equal split
         "tilt": 10.0,               # same roof pitch
-        "capacity_kw": 2.1,         # aspirational: clean older 10 × 220 W string
-        "vmp_typical": 150,         # observed string Vmp ~135-160V — just above turn-on
+        # 10 × 220 W nameplate. MEASURED peak ≈ 2.0 kW (very close to
+        # nameplate — this string is actually performing well).
+        "effective_peak_kw": 2.0,
+        "capacity_kw": 2.1,
         "panel_count": 10,          # 5 per side
         "panel_layout": [5, 1],     # per-side layout: 5 cols × 1 row
         "color": 0x27ae60,          # Green
@@ -168,9 +174,42 @@ SYSTEM_EFFICIENCY = 0.96
 # fudge factor on top of this.
 ATMOS_TRANSMITTANCE = 0.70
 
-# Diffuse fraction of GHI. Clear-sky desert/coastal values are 0.08-0.12.
-# User confirmed Oakland skies are consistently very clear, so 0.10.
-DIFFUSE_FRACTION_OF_GHI = 0.10
+# Diffuse fraction of GHI. Very clear-sky values (high-altitude desert
+# or coastal CA with clear marine air) can be as low as 0.05. User
+# confirmed Oakland skies are consistently very clear.
+DIFFUSE_FRACTION_OF_GHI = 0.05
+
+
+def inverter_load_efficiency(load_fraction: float) -> float:
+    """Inverter conversion efficiency as a function of output load.
+
+    Documented in every inverter datasheet — at low loads, fixed
+    switching + control losses dominate. CEC weighted-average
+    methodology accounts for this. Typical curve:
+
+        load <  2%   :  shutdown (deep idle, no output)
+        load <  5%   :  ~75% efficient (mostly burning fixed loss)
+        load < 10%   :  ~88%
+        load < 20%   :  ~93%
+        load < 30%   :  ~96%
+        load >= 30%  :  ~97% (peak)
+
+    This makes morning/evening hours significantly less productive
+    than the cos_incidence math alone would suggest — the real
+    reason daily integrals are lower than astronomical-day-length
+    × peak-power implies.
+    """
+    if load_fraction < 0.02:
+        return 0.0
+    if load_fraction < 0.05:
+        return 0.50 + (load_fraction - 0.02) / 0.03 * (0.75 - 0.50)
+    if load_fraction < 0.10:
+        return 0.75 + (load_fraction - 0.05) / 0.05 * (0.88 - 0.75)
+    if load_fraction < 0.20:
+        return 0.88 + (load_fraction - 0.10) / 0.10 * (0.93 - 0.88)
+    if load_fraction < 0.30:
+        return 0.93 + (load_fraction - 0.20) / 0.10 * (0.96 - 0.93)
+    return 0.97
 
 
 def mppt_voltage_efficiency(vmp: float) -> float:
@@ -1649,7 +1688,7 @@ HTML_TEMPLATE = '''
             <div class="section" id="pv-arrays-section">
                 <div class="mppt-zero-message">All MPPT inputs idle (0 W)</div>
                 <div class="mppt-line mppt-row">
-                    <span class="mppt-name"><span class="mppt-dot ne"></span> MPPT 1 (NE)</span>
+                    <span class="mppt-name"><span class="mppt-dot sw"></span> MPPT 1 (SW)</span>
                     <span class="mppt-voltage-text" id="pv1-detail">-- V / -- A</span>
                     <span class="mppt-power-text" id="pv1">-- W</span>
                 </div>
@@ -1657,7 +1696,7 @@ HTML_TEMPLATE = '''
                     <div class="mppt-voltage-bar"><div class="fill" id="pv1-voltage-fill"></div></div>
                 </div>
                 <div class="mppt-line mppt-row">
-                    <span class="mppt-name"><span class="mppt-dot sw"></span> MPPT 2 (SW)</span>
+                    <span class="mppt-name"><span class="mppt-dot ne"></span> MPPT 2 (NE)</span>
                     <span class="mppt-voltage-text" id="pv2-detail">-- V / -- A</span>
                     <span class="mppt-power-text" id="pv2">-- W</span>
                 </div>
@@ -3644,16 +3683,15 @@ def get_data():
                 sun_pos["altitude"], sun_pos["azimuth"],
                 array["tilt"], array["azimuth"], dni,
             )
-        # Cell heating derate (depends on per-array plane-of-array irradiance)
-        # + cloud cover (currently 1.0 — extend with weather API later)
-        # + MPPT voltage efficiency (per-array, the dominant non-physics loss
-        #   on this install — strings run far below the inverter's sweet spot).
-        temp_factor  = pv_temperature_derate(irradiance)
-        cloud_factor = DEFAULT_CLOUD_FACTOR
-        mppt_factor  = mppt_voltage_efficiency(array.get("vmp_typical", 450))
-        array_power = (array["capacity_kw"] * 1000 * (irradiance / 1000)
-                       * SYSTEM_EFFICIENCY * temp_factor * cloud_factor
-                       * mppt_factor)
+        # Calibrated model: each array's effective_peak_kw is the MEASURED
+        # peak from inverter chart data on best days. We modulate it by the
+        # POA irradiance ratio (so current POA / peak POA = fraction of
+        # peak). All real-world losses (MPPT-voltage, wiring, mismatch)
+        # are already baked into effective_peak_kw because it's measured,
+        # not derived from nameplate.
+        # Reference POA ≈ 1000 W/m² (typical clear-noon irradiance).
+        array_power = (array.get("effective_peak_kw", array["capacity_kw"])
+                       * 1000 * (irradiance / 1000.0) * DEFAULT_CLOUD_FACTOR)
         expected_power += array_power
 
     # Get inverter data (cached or fresh)
@@ -3737,12 +3775,8 @@ def _ensure_today_cumulative(date):
                         irr = calculate_panel_irradiance(
                             pos["altitude"], pos["azimuth"],
                             array["tilt"], array["azimuth"], dni)
-                    temp_factor = pv_temperature_derate(irr)
-                    cloud_factor = DEFAULT_CLOUD_FACTOR
-                    mppt_factor = mppt_voltage_efficiency(array.get("vmp_typical", 450))
-                    slot_power_w += (array["capacity_kw"] * 1000 * (irr / 1000)
-                                     * SYSTEM_EFFICIENCY * temp_factor
-                                     * cloud_factor * mppt_factor)
+                    slot_power_w += (array.get("effective_peak_kw", array["capacity_kw"])
+                                     * 1000 * (irr / 1000.0) * DEFAULT_CLOUD_FACTOR)
             running_wh += slot_power_w * 0.5   # 30-min slot, Wh
             cumulative.append(running_wh)
 
