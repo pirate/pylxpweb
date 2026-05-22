@@ -1090,9 +1090,10 @@ HTML_TEMPLATE = '''
             letter-spacing: 0.02em;
             white-space: nowrap;
         }
-        /* Sun + moon icons next to sunrise/sunset times. The unicode glyphs
-           ☀ ☾ render as text so we can colorize them via CSS. */
+        /* Sun + peak + moon icons next to sunrise / solar-noon / sunset.
+           Unicode glyphs render as text so we can colorize them via CSS. */
         .sun-times .sun-icon  { color: #f1c40f; font-size: 1.15em; }
+        .sun-times .peak-icon { color: #e67e22; font-size: 1.05em; }
         .sun-times .moon-icon { color: #5d6d9c; font-size: 1.15em; }
         /* Battery upper-right SOC · V · A — all three bold for legibility */
         .card-meta-tag.battery-tag {
@@ -1700,6 +1701,7 @@ HTML_TEMPLATE = '''
                         <div class="label">PV Power</div>
                         <div class="sun-times">
                             <span class="sun-icon">☀</span><span id="sunrise">--:--</span>
+                            &nbsp;<span class="peak-icon" title="Solar noon (peak output)">⛰</span><span id="solar-peak">--:--</span>
                             &nbsp;<span class="moon-icon">☾</span><span id="sunset">--:--</span>
                         </div>
                     </div>
@@ -3284,6 +3286,7 @@ HTML_TEMPLATE = '''
                 if (data.sun) {
                     updateSunPosition(data.sun.altitude, data.sun.azimuth);
                     document.getElementById('sunrise').textContent = formatTime(data.sun.sunrise_hour);
+                    document.getElementById('solar-peak').textContent = formatTime(data.sun.solar_noon_hour);
                     document.getElementById('sunset').textContent = formatTime(data.sun.sunset_hour);
                 }
 
@@ -3875,6 +3878,15 @@ def get_data():
             "azimuth": sun_pos["azimuth"],
             "sunrise_hour": sun_pos["sunrise_hour"],
             "sunset_hour": sun_pos["sunset_hour"],
+            # Solar noon — peak sun altitude, ~when PV output peaks for
+            # our nearly-horizontal (10° tilt) arrays. Midpoint between
+            # sunrise and sunset.
+            "solar_noon_hour": (
+                (sun_pos["sunrise_hour"] + sun_pos["sunset_hour"]) / 2.0
+                if sun_pos["sunrise_hour"] is not None
+                and sun_pos["sunset_hour"] is not None
+                else None
+            ),
             "is_daylight": sun_pos["is_daylight"],
         },
         "sun_path": sun_path,
