@@ -152,15 +152,23 @@ RIDGELINE_AZIMUTH = (_sw_array["azimuth"] - 90) if _sw_array else 127.0
 # System efficiency — aspirational model.
 # Represents the best realistic case if everything were optimal:
 #   - Panels perfectly clean (no soiling losses)
-#   - Modern hybrid inverter at peak efficiency (~97%)
-#   - Minimal wiring losses (~1%)
-#   - Optimal cell temperature (no thermal derating)
-#   - No string mismatch
-# 0.97 = 0.97 inverter * 0.99 wiring * 1.0 (clean) * 1.0 (cool cells) * ~1.01 small headroom
-# Actual production should always be at-or-below this number; the gap shows you
-# how much performance is being lost to soiling, age, heat, suboptimal MPPT,
-# wiring losses, etc. — i.e. *optimization headroom*.
-SYSTEM_EFFICIENCY = 0.97
+#   - Real-world inverter efficiency (~94-96%)
+#   - Real wiring + connector losses (~2%)
+#   - Mild soiling (~3%)
+#   - Module mismatch + DC/AC ratio (~2%)
+#   - Older split-array (MPPT3) underperforms its nameplate ~10-15%
+# Combined → ~0.80 effective system-level derate for our install.
+SYSTEM_EFFICIENCY = 0.80
+
+# Atmospheric clear-sky transmittance for the air-mass DNI model. Textbook
+# Bird-Hulstrom uses 0.7 (Sahara-clear). Coastal Bay-Area sky has marine
+# layer + haze; 0.58 calibrated against measured peak output at Oakland.
+ATMOS_TRANSMITTANCE = 0.58
+
+# Diffuse fraction of GHI (sky-diffuse contribution to plane-of-array).
+# Pristine clear-sky upper bound is ~22%, but coastal CA real-world is
+# closer to 10-14%. We use 0.12 — represents typical haze layer.
+DIFFUSE_FRACTION_OF_GHI = 0.12
 
 # Inverter credentials — sourced from addon options / env / .env file
 INVERTER_CONFIG = {
@@ -361,7 +369,7 @@ def calculate_clear_sky_dni(altitude: float) -> float:
         return 0.0
     altitude_rad = math.radians(altitude)
     air_mass = 1.0 / (math.sin(altitude_rad) + 0.50572 * (altitude + 6.07995) ** -1.6364)
-    transmittance = 0.7 ** (air_mass ** 0.678)
+    transmittance = ATMOS_TRANSMITTANCE ** (air_mass ** 0.678)
     return 1361.0 * transmittance
 
 
@@ -385,12 +393,7 @@ def calculate_panel_irradiance(sun_alt: float, sun_az: float, panel_tilt: float,
 
     direct = dni * cos_incidence
     ghi = dni * math.sin(sun_alt_rad)
-    # Diffuse fraction: 22% — aspirational clear-sky for California summer
-    # (real-world ranges 12-20%, but the upper end represents pristine
-    # atmospheric conditions). Combined with ground albedo, low-tilt panels
-    # can pick up significant diffuse irradiance.
-    DIFFUSE_FRACTION = 0.22
-    diffuse = ghi * DIFFUSE_FRACTION * (1 + math.cos(panel_tilt_rad)) / 2
+    diffuse = ghi * DIFFUSE_FRACTION_OF_GHI * (1 + math.cos(panel_tilt_rad)) / 2
     return direct + diffuse
 
 
@@ -3180,14 +3183,19 @@ HTML_TEMPLATE = '''
                     // bar shows meaningful fill on a normal day (~20 kWh = 44%).
                     const homeBudget = 45;
 
-                    // Single-sided daily bar: PV, Home.
+                    // Single-sided daily bar: PV, Home. Label is HTML so
+                    // we can use <span class="meta-suffix"> to make trailing
+                    // words ("generated", "used") small/grey like "expected"
+                    // on the right side — only the kWh number stays big+bold.
                     const setDailySingle = (kind, current, target, label) => {
                         const pct = target > 0 ? Math.min(100, current / target * 100) : 0;
                         document.getElementById(kind + '-daily-fill').style.width = pct.toFixed(1) + '%';
-                        document.getElementById(kind + '-daily-text').textContent = label;
+                        document.getElementById(kind + '-daily-text').innerHTML = label;
                     };
-                    setDailySingle('pv',   yld,   expectedDaily, `${yld.toFixed(1)} kWh generated`);
-                    setDailySingle('home', usage, homeBudget,    `${usage.toFixed(1)} kWh`);
+                    setDailySingle('pv',   yld,   expectedDaily,
+                        `${yld.toFixed(1)} kWh<span class="meta-suffix">generated</span>`);
+                    setDailySingle('home', usage, homeBudget,
+                        `${usage.toFixed(1)} kWh<span class="meta-suffix">used</span>`);
                     document.getElementById('pv-daily-target').textContent =
                         `of ${expectedDaily.toFixed(0)} kWh expected`;
                     document.getElementById('home-daily-target').textContent =
