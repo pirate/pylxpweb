@@ -2334,10 +2334,17 @@ HTML_TEMPLATE = '''
             // BMS limit-change event (typically correlates with charging stop)
             if (ev.type === 'bms_charge' || ev.type === 'bms_discharge') {
                 const dir = ev.new_a < ev.prev_a ? 'down' : 'up';
+                // Right-side meta: SOC and battery voltage at the moment
+                // the limit changed — helps diagnose whether the BMS was
+                // top-balancing (high SOC, high V) vs over-current trip.
+                const socStr  = ev.soc  != null ? `SOC ${ev.soc}%` : '';
+                const vbatStr = ev.vbat != null ? `${ev.vbat}V`    : '';
+                const meta = [socStr, vbatStr].filter(Boolean).join(' · ');
                 return `<div class="event-row event-bms event-bms-${dir}${ageCls}">
                     <div class="event-time">${ev.start}</div>
                     <div class="event-details">
                         <div class="event-reason">⚡ ${ev.reason}</div>
+                        ${meta ? `<div class="event-meta">${meta}</div>` : ''}
                     </div>
                 </div>`;
             }
@@ -4283,10 +4290,24 @@ async def _fetch_bms_limit_events():
             client.analytics.get_chart_data(serial, "maxDischgCurr", yesterday.isoformat()),
             client.analytics.get_chart_data(serial, "maxChgCurr",    today.isoformat()),
             client.analytics.get_chart_data(serial, "maxDischgCurr", today.isoformat()),
+            # SOC + battery voltage for diagnostic context on the event row
+            client.analytics.get_chart_data(serial, "soc",  yesterday.isoformat()),
+            client.analytics.get_chart_data(serial, "soc",  today.isoformat()),
+            client.analytics.get_chart_data(serial, "vBat", yesterday.isoformat()),
+            client.analytics.get_chart_data(serial, "vBat", today.isoformat()),
         )
     except Exception as e:
         print(f"bms events fetch error: {e}", flush=True)
         return []
+
+    # Build {time → soc} and {time → vBat} lookups for cross-reference
+    soc_lookup, vbat_lookup = {}, {}
+    for src in (results[4].get("data", []) or []) + (results[5].get("data", []) or []):
+        t = src.get("time")
+        if t: soc_lookup[t] = src.get("value")
+    for src in (results[6].get("data", []) or []) + (results[7].get("data", []) or []):
+        t = src.get("time")
+        if t: vbat_lookup[t] = src.get("value")
 
     out = []
     # Each field: walk samples in time order, emit an event each time the
@@ -4325,6 +4346,8 @@ async def _fetch_bms_limit_events():
                 direction = "↓" if v < prev_val else "↑"
                 date_prefix = "" if ts.date() == today \
                                 else ts.strftime("%a ")
+                soc_at = soc_lookup.get(t)
+                vbat_at = vbat_lookup.get(t)
                 out.append({
                     "type":   kind,
                     "ts":     ts.isoformat(),
@@ -4334,6 +4357,9 @@ async def _fetch_bms_limit_events():
                     "reason": f"{label_singular} {direction} {prev_val:.0f}A → {v:.0f}A",
                     "prev_a": prev_val,
                     "new_a":  v,
+                    "soc":    int(soc_at) if soc_at is not None else None,
+                    # vBat in chart-data is reported in volts directly
+                    "vbat":   round(float(vbat_at), 2) if vbat_at is not None else None,
                 })
             prev_val = v
     return out
