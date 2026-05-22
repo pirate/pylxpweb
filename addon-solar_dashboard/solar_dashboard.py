@@ -965,10 +965,13 @@ HTML_TEMPLATE = '''
         .stat-value.good { color: #2ecc71; }
         .stat-value.warning { color: #f39c12; }
         .stat-value.bad { color: #e74c3c; }
-        /* Single-line MPPT row: name on left, V/A in middle, W on right. */
+        /* Single-line MPPT row: name on left, V/A in middle, W on right.
+           Grid layout (not flex) so the voltage + power columns align
+           across all three rows — the longer "(NE · 37° / SW · 217°)"
+           label on row 3 used to push them out of position. */
         .mppt-line {
-            display: flex;
-            justify-content: space-between;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 95px 60px;
             align-items: baseline;
             gap: 8px;
             padding: 4px 0 2px;
@@ -977,10 +980,11 @@ HTML_TEMPLATE = '''
         .mppt-line .mppt-name {
             color: #aaa;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .mppt-line .mppt-voltage-text {
-            flex: 1;
-            text-align: center;
+            text-align: right;
             color: #3498db;
             font-size: 0.85em;
             font-variant-numeric: tabular-nums;
@@ -991,6 +995,7 @@ HTML_TEMPLATE = '''
         .mppt-line .mppt-voltage-text.warning { color: #f39c12; }
         .mppt-line .mppt-voltage-text.bad { color: #e74c3c; }
         .mppt-line .mppt-power-text {
+            text-align: right;
             color: #f39c12;
             font-weight: 600;
             font-variant-numeric: tabular-nums;
