@@ -168,34 +168,37 @@ SYSTEM_EFFICIENCY = 0.96
 # fudge factor on top of this.
 ATMOS_TRANSMITTANCE = 0.70
 
-# Diffuse fraction of GHI on tilted panels — realistic 15% for our 10°
-# roof tilt.
-DIFFUSE_FRACTION_OF_GHI = 0.15
+# Diffuse fraction of GHI. Clear-sky desert/coastal values are 0.08-0.12.
+# User confirmed Oakland skies are consistently very clear, so 0.10.
+DIFFUSE_FRACTION_OF_GHI = 0.10
 
 
 def mppt_voltage_efficiency(vmp: float) -> float:
     """Efficiency of the inverter's DC-DC stage at a given string Vmp.
 
-    FlexBOSS21 (and most string hybrids) hit peak DC-DC efficiency in the
-    400-500 V Vmp range. Below that the converter has to step down a
-    wider ratio (Vmp → ~50 V battery bus) and the per-watt switching
+    FlexBOSS21 (and most string hybrids) hit peak DC-DC efficiency in
+    the 400-500 V Vmp range. Below that the converter has to step down
+    a wider ratio (Vmp → ~50 V battery bus) and the per-watt switching
     losses go up. Our system runs ~245-256 V on MPPT1/2 and ~135 V on
     MPPT3, well below optimal — that's the dominant non-physics loss.
 
-    Piecewise-linear approximation of a typical S-curve:
-        ≤140 V       : 0      (below turn-on; inverter ignores the string)
-        140 → 250 V  : 0.55 → 0.75    (functional but lossy)
-        250 → 400 V  : 0.75 → 0.96    (climbing toward sweet spot)
-        400 → 580 V  : 0.96 → 0.99    (sweet spot)
-        >580 V       : 0      (above max; would fault out)
+    Approximate curve (piecewise-linear S-shape):
+        ≤80 V       : 0           (well below turn-on)
+        80 → 150 V  : 0.55 → 0.72 (just past turn-on; lossy)
+        150 → 250 V : 0.72 → 0.85
+        250 → 400 V : 0.85 → 0.97 (climbing to sweet spot)
+        400 → 580 V : 0.97 → 0.99 (sweet spot)
+        >580 V      : 0           (over-voltage cutoff)
     """
-    if vmp <= 140 or vmp > 580:
+    if vmp <= 80 or vmp > 580:
         return 0.0
+    if vmp <= 150:
+        return 0.55 + (vmp - 80) / (150 - 80) * (0.72 - 0.55)
     if vmp <= 250:
-        return 0.55 + (vmp - 140) / (250 - 140) * (0.75 - 0.55)
+        return 0.72 + (vmp - 150) / (250 - 150) * (0.85 - 0.72)
     if vmp <= 400:
-        return 0.75 + (vmp - 250) / (400 - 250) * (0.96 - 0.75)
-    return 0.96 + (vmp - 400) / (580 - 400) * (0.99 - 0.96)
+        return 0.85 + (vmp - 250) / (400 - 250) * (0.97 - 0.85)
+    return 0.97 + (vmp - 400) / (580 - 400) * (0.99 - 0.97)
 
 # Inverter credentials — sourced from addon options / env / .env file
 INVERTER_CONFIG = {
@@ -400,6 +403,22 @@ def calculate_clear_sky_dni(altitude: float) -> float:
     return 1361.0 * transmittance
 
 
+def aoi_modifier(cos_incidence: float) -> float:
+    """ASHRAE incidence-angle modifier for panel-glass surface reflection.
+
+    cos_incidence projects the beam onto the panel (the geometric piece);
+    this captures the additional optical loss when the beam hits the glass
+    at an oblique angle and more of it gets reflected away. b0 = 0.05 is
+    the standard value for glass-encapsulated crystalline Si.
+
+    At normal incidence (cos=1) returns ~1.0. By cos=0.5 (60° AOI) it's
+    ~0.95. By cos=0.2 (78° AOI) it's ~0.80. Very oblique = sharp drop.
+    """
+    if cos_incidence <= 0.05:
+        return 0.0
+    return max(0.0, 1.0 - 0.05 * (1.0 / cos_incidence - 1.0))
+
+
 def calculate_panel_irradiance(sun_alt: float, sun_az: float, panel_tilt: float, panel_az: float, dni: float) -> float:
     """Calculate irradiance on a tilted panel."""
     if sun_alt <= 0 or dni <= 0:
@@ -418,7 +437,12 @@ def calculate_panel_irradiance(sun_alt: float, sun_az: float, panel_tilt: float,
     if cos_incidence <= 0:
         return 0.0
 
-    direct = dni * cos_incidence
+    # Direct beam: project onto panel + apply AOI reflection modifier.
+    # This is critical for low-sun hours — without IAM, a 10° tilt array
+    # gets unrealistically much output during morning/evening because the
+    # geometric cos_incidence stays nonzero but the actual glass-reflection
+    # loss isn't modeled.
+    direct = dni * cos_incidence * aoi_modifier(cos_incidence)
     ghi = dni * math.sin(sun_alt_rad)
     diffuse = ghi * DIFFUSE_FRACTION_OF_GHI * (1 + math.cos(panel_tilt_rad)) / 2
     return direct + diffuse
