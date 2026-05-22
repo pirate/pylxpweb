@@ -736,7 +736,7 @@ async def fetch_inverter_data():
             await client.__aenter__()
             _inverter_cache["client"] = client
 
-            # Load stations and get inverter once
+            # Load stations and get inverter + MID device once
             stations = await Station.load_all(client)
             if not stations:
                 return None
@@ -744,12 +744,24 @@ async def fetch_inverter_data():
             for inv in station.all_inverters:
                 _inverter_cache["inverter"] = inv
                 break
+            # GridBOSS MID device — exposes UPS terminal per-leg loads
+            # (what we surface as the Home card "EPS" line readouts).
+            for pg in station.parallel_groups:
+                if pg.mid_device:
+                    _inverter_cache["mid"] = pg.mid_device
+                    break
 
         inverter = _inverter_cache["inverter"]
         if not inverter:
             return None
 
         await inverter.refresh()
+        mid = _inverter_cache.get("mid")
+        if mid:
+            try:
+                await mid.refresh()
+            except Exception:
+                pass
 
         def _safe(getter, default=None):
             try:
@@ -791,6 +803,15 @@ async def fetch_inverter_data():
             "inverter_power": inverter.inverter_power,
             "inverter_temperature": inverter.inverter_temperature,
             "status": inverter.status_text,
+            # GridBOSS MID UPS terminal — per-leg backed-up load power +
+            # current. These are what the user calls "EPS line 1 / 2",
+            # not the inverter's eps_power_* (which always reads 0 on
+            # this hardware because the inverter's EPS port isn't used —
+            # the MID device handles backup output).
+            "eps_power_l1":   _safe(lambda: mid.ups_l1_power,   0) if mid else 0,
+            "eps_power_l2":   _safe(lambda: mid.ups_l2_power,   0) if mid else 0,
+            "eps_amps_l1":    _safe(lambda: mid.ups_l1_current, 0.0) if mid else 0.0,
+            "eps_amps_l2":    _safe(lambda: mid.ups_l2_current, 0.0) if mid else 0.0,
             # Today's energy totals (kWh) — populated when EnergyInfo is available
             "energy_today_yield":    _safe(lambda: inverter.total_energy_today, 0.0),
             "energy_today_charge":   _safe(lambda: inverter.energy_today_charging, 0.0),
@@ -1111,6 +1132,17 @@ HTML_TEMPLATE = '''
         .bat-icon  { color: #2ecc71; margin-right: 2px; font-size: 0.9em; }
         .volt-icon { color: #f1c40f; margin-right: 2px; font-size: 0.85em; }
         .amp-icon  { color: #3498db; margin-right: 2px; font-size: 0.9em; font-weight: 700; }
+
+        /* Home card upper-right: EPS leg powers, kW prominent + amps muted. */
+        .card-meta-tag.home-tag {
+            font-weight: 700;
+            color: #ddd;
+        }
+        .card-meta-tag.home-tag .eps-amps {
+            font-weight: 400;
+            font-size: 0.85em;
+            color: #888;
+        }
         /* Battery upper-right SOC · V · A — all three bold for legibility */
         .card-meta-tag.battery-tag {
             font-weight: 700;
@@ -1795,7 +1827,14 @@ HTML_TEMPLATE = '''
                     </div>
                 </div>
                 <div class="power-card" id="home-card">
-                    <div class="label">Home</div>
+                    <div class="power-card-header">
+                        <div class="label">Home</div>
+                        <div class="card-meta-tag home-tag" id="home-eps-tag">
+                            <span id="home-eps-l1">-- kW</span>
+                            &nbsp;+&nbsp;
+                            <span id="home-eps-l2">-- kW</span>
+                        </div>
+                    </div>
                     <div class="value home idle" id="home-top-power">--</div>
                     <div class="performance-bar">
                         <div class="fill home" id="home-load-fill" style="width: 0%"></div>
@@ -3428,6 +3467,16 @@ HTML_TEMPLATE = '''
                     // NEW Home card — consumption_power is whole-house load
                     const homePower = numericPower(inv.consumption_power);
                     updatePowerLoadCard('home', homePower);
+
+                    // Upper-right: per-EPS-leg wattage + amperage (from
+                    // GridBOSS MID UPS terminals). Voltage + frequency
+                    // omitted — flat 120/240V & 60Hz, no signal.
+                    const fmtLeg = (w, a) =>
+                        `${(w/1000).toFixed(2)} kW <span class="eps-amps">(${a.toFixed(1)}A)</span>`;
+                    document.getElementById('home-eps-l1').innerHTML =
+                        fmtLeg(numericPower(inv.eps_power_l1), numericPower(inv.eps_amps_l1));
+                    document.getElementById('home-eps-l2').innerHTML =
+                        fmtLeg(numericPower(inv.eps_power_l2), numericPower(inv.eps_amps_l2));
 
                     // Color-code the top-card borders based on state.
                     updateCardBorders({
