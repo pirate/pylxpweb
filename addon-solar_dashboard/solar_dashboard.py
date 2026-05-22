@@ -1218,14 +1218,25 @@ HTML_TEMPLATE = '''
         }
 
         /* Single-line daily $ summary under the grid card's daily-bar.
-           Layout: imp formula on left, net $ in center, exp formula on right. */
-        .grid-money-row {
-            font-variant-numeric: tabular-nums;
-            color: #888;
+           Layout: imp formula on left, net $ in center, exp formula on right.
+           The kWh number is full daily-meta size + bold; the "× X.X¢" rate
+           annotation is smaller and lighter weight (like a meta-suffix). */
+        .grid-money-row { font-variant-numeric: tabular-nums; color: #888; }
+        .grid-money-row .money-imp { color: #e74c3c; }
+        .grid-money-row .money-exp { color: #2ecc71; }
+        .grid-money-row .money-imp .kwh-val,
+        .grid-money-row .money-exp .kwh-val {
+            font-weight: 700;
+            font-size: 1em;             /* full daily-meta size */
         }
-        .grid-money-row .money-imp  { color: #e74c3c; opacity: 0.85; font-weight: 400; font-size: 0.7em; }
-        .grid-money-row .money-exp  { color: #2ecc71; opacity: 0.85; font-weight: 400; font-size: 0.7em; }
-        .grid-money-row .money-net  { color: #ddd; font-weight: 700; }
+        .grid-money-row .money-imp .rate-mult,
+        .grid-money-row .money-exp .rate-mult {
+            font-weight: 400;
+            font-size: 0.7em;
+            opacity: 0.7;
+            margin-left: 3px;
+        }
+        .grid-money-row .money-net { color: #ddd; font-weight: 700; }
         .grid-money-row .money-net.profit { color: #2ecc71; }
         .grid-money-row .money-net.loss   { color: #e74c3c; }
         .event-row {
@@ -3455,10 +3466,12 @@ HTML_TEMPLATE = '''
                         const impRate = sch.rates.currently_active_import_rate;
                         const expRate = sch.rates.currently_active_export_rate;
                         const net = (expKwh * expRate) - (impKwh * impRate);
-                        document.getElementById('grid-daily-imported').textContent =
-                            `${impKwh.toFixed(2)}kWh × ${(impRate*100).toFixed(1)}¢`;
-                        document.getElementById('grid-daily-exported').textContent =
-                            `${expKwh.toFixed(1)}kWh × ${(expRate*100).toFixed(1)}¢`;
+                        document.getElementById('grid-daily-imported').innerHTML =
+                            `<span class="kwh-val">${impKwh.toFixed(2)} kWh</span>`
+                            + `<span class="rate-mult">× ${(impRate*100).toFixed(1)}¢</span>`;
+                        document.getElementById('grid-daily-exported').innerHTML =
+                            `<span class="kwh-val">${expKwh.toFixed(1)} kWh</span>`
+                            + `<span class="rate-mult">× ${(expRate*100).toFixed(1)}¢</span>`;
                         const netEl = document.getElementById('grid-money-net');
                         const sign = net >= 0 ? '+' : '−';
                         netEl.textContent = `${sign}$${Math.abs(net).toFixed(2)}`;
