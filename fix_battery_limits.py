@@ -46,14 +46,20 @@ EXPECTED = {
     "HOLD_LEAD_ACID_CHARGE_VOLT_REF":          "55",   # 3.44 V/cell
 
     # === Current limits (BMS reports 160 A chg / 180 A dis; inverter set
-    # slightly above so BMS does the throttling) ===
-    "HOLD_LEAD_ACID_CHARGE_RATE":              "175",
-    "HOLD_LEAD_ACID_DISCHARGE_RATE":           "190",
+    # at 200 A so BMS does all the throttling) ===
+    # User raised from 175/190 → 200/200 on 2026-05-22 to let BMS-limited
+    # full-rate charging happen.
+    "HOLD_LEAD_ACID_CHARGE_RATE":              "200",
+    "HOLD_LEAD_ACID_DISCHARGE_RATE":           "200",
 
     # === SOC limits ===
     "HOLD_SYSTEM_CHARGE_SOC_LIMIT":            "95",   # charge ceiling (~95%)
-    "HOLD_DISCHG_CUT_OFF_SOC_EOD":             "8",    # absolute discharge floor
-    "HOLD_FORCED_DISCHG_SOC_LIMIT":            "55",   # leaves ≥15 kWh reserve to avoid AC-charge trigger
+    # User lowered absolute floor 8 → 5% on 2026-05-22 (squeeze more usable
+    # capacity; BMS still trips at 0% so this is the inverter-side floor).
+    "HOLD_DISCHG_CUT_OFF_SOC_EOD":             "5",
+    # User raised forced-discharge floor 55 → 70% on 2026-05-22, reserves
+    # more for overnight ride-through (≥27 kWh combined-pack reserve below 70%).
+    "HOLD_FORCED_DISCHG_SOC_LIMIT":            "70",
     "HOLD_FORCED_CHG_SOC_LIMIT":               "88",
 
     # === AC charge guard rails ===
@@ -65,7 +71,11 @@ EXPECTED = {
     "HOLD_AC_CHARGE_SOC_LIMIT":                "100",  # max SOC AC charging will fill to
 
     # === Mode flags ===
-    "FUNC_LSP_SELF_CONSUMPTION_EN":            True,   # load priority
+    # User disabled self-consumption on 2026-05-22 — relies on the BAT_FIRST
+    # schedule + forced-discharge schedule alone rather than the CT-driven
+    # auto-priority logic. Reduces chasing-the-zero behavior around the CT
+    # deadband.
+    "FUNC_LSP_SELF_CONSUMPTION_EN":            False,
     "FUNC_LSP_CHARGE_PRIORITY_EN":             True,   # NB: keeps flipping back to True; live with it
     "FUNC_LSP_BATT_VOLT_OR_SOC":               False,  # SOC-based control (BMS reports SOC)
     "FUNC_GRID_CT_CONNECTION_EN":              True,
@@ -79,8 +89,18 @@ EXPECTED = {
     # battery + PV can both export. Must be FALSE for forced discharge to work.
     "FUNC_PV_SELL_TO_GRID_EN":                 False,  # "Export PV Only" — must stay FALSE
     "FUNC_FEED_IN_GRID_EN":                    True,   # "Sell-back to grid" — must stay TRUE
-    "HOLD_FEED_IN_GRID_POWER_PERCENT":         "12",   # export cap kW (max 12 = inverter limit)
-    "HOLD_FORCED_DISCHG_POWER_CMD":            "6",    # forced-discharge target kW
+    # User lowered export cap 12 → 8 kW on 2026-05-22 (reduces grid-side
+    # heating + voltage rise during peak window; inverter still does 12 kW
+    # max but won't actually push that).
+    "HOLD_FEED_IN_GRID_POWER_PERCENT":         "8",
+    # User raised forced-discharge target 6 → 8 kW on 2026-05-22 to match
+    # the new export cap.
+    "HOLD_FORCED_DISCHG_POWER_CMD":            "8",
+    # CT deadband — grid flow within ±this many watts is treated as zero
+    # and not corrected. User wants 10 W (was 25.5 W EG4 default) so the
+    # dashboard reflects small phantom imports/exports instead of hiding
+    # them. See apply_export_lock.py for the change.
+    "HOLD_EXPORT_LOCK_POWER":                  "10",
 
     # === Forced-discharge schedule (16:00–20:59 PG&E peak window) ===
     "HOLD_FORCED_DISCHARGE_START_HOUR":        "16",
