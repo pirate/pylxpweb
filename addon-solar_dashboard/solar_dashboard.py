@@ -1726,7 +1726,7 @@ HTML_TEMPLATE = '''
             <div class="section" id="pv-arrays-section">
                 <div class="mppt-zero-message">All MPPT inputs idle (0 W)</div>
                 <div class="mppt-line mppt-row">
-                    <span class="mppt-name"><span class="mppt-dot sw"></span> MPPT 1 (SW)</span>
+                    <span class="mppt-name"><span class="mppt-dot sw"></span> MPPT 1 (SW · 217°)</span>
                     <span class="mppt-voltage-text" id="pv1-detail">-- V / -- A</span>
                     <span class="mppt-power-text" id="pv1">-- W</span>
                 </div>
@@ -1734,7 +1734,7 @@ HTML_TEMPLATE = '''
                     <div class="mppt-voltage-bar"><div class="fill" id="pv1-voltage-fill"></div></div>
                 </div>
                 <div class="mppt-line mppt-row">
-                    <span class="mppt-name"><span class="mppt-dot ne"></span> MPPT 2 (NE)</span>
+                    <span class="mppt-name"><span class="mppt-dot ne"></span> MPPT 2 (NE · 37°)</span>
                     <span class="mppt-voltage-text" id="pv2-detail">-- V / -- A</span>
                     <span class="mppt-power-text" id="pv2">-- W</span>
                 </div>
@@ -1742,7 +1742,7 @@ HTML_TEMPLATE = '''
                     <div class="mppt-voltage-bar"><div class="fill" id="pv2-voltage-fill"></div></div>
                 </div>
                 <div class="mppt-line mppt-row">
-                    <span class="mppt-name"><span class="mppt-dot yard"></span> MPPT 3 (Mixed)</span>
+                    <span class="mppt-name"><span class="mppt-dot yard"></span> MPPT 3 (NE · 37° / SW · 217°)</span>
                     <span class="mppt-voltage-text" id="pv3-detail">-- V / -- A</span>
                     <span class="mppt-power-text" id="pv3">-- W</span>
                 </div>
