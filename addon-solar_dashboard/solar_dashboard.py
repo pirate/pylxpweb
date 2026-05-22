@@ -87,17 +87,19 @@ HOUSE = {
 SOLAR_ARRAYS = [
     {
         # 14 × 550 W = 7.7 kW nameplate. Measured peak from inverter chart
-        # data on best-5 May days: 4.7-4.8 kW. effective_peak_kw is the
-        # array's max output normalized to POA=1000 W/m²; at solar noon
-        # the model's POA on this 10° SW-facing array is ~966 W/m², so
-        # effective_peak ÷ 1000 × POA gives the actual modeled peak.
-        # Set ~5% above measured max so the model stays a true upper
-        # bound — actual production should never exceed it.
+        # data on best-5 May days: 4.7-4.8 kW (those are 4-min sample
+        # maxes; instantaneous peaks can run a bit higher, and June will
+        # be higher still as we approach solstice). effective_peak_kw is
+        # the array's output normalized to POA=1000 W/m². Set high enough
+        # that actual never exceeds the model, accounting for:
+        #   - sub-4-min spikes the chart-data summary misses
+        #   - June/July gains (~5% over May)
+        #   - cool-panel days with marginally higher cell efficiency
         "name": "SW Roof (MPPT1)",
         "type": "roof",
         "azimuth": 217.0,
         "tilt": 10.0,
-        "effective_peak_kw": 5.2,
+        "effective_peak_kw": 5.6,
         "capacity_kw": 7.7,
         "panel_count": 14,
         "panel_layout": [7, 2],
@@ -109,7 +111,7 @@ SOLAR_ARRAYS = [
         "type": "roof",
         "azimuth": 37.0,
         "tilt": 10.0,
-        "effective_peak_kw": 5.2,
+        "effective_peak_kw": 5.6,
         "capacity_kw": 7.7,
         "panel_count": 14,
         "panel_layout": [7, 2],
@@ -133,8 +135,9 @@ SOLAR_ARRAYS = [
         "fractions": [0.5, 0.5],    # equal split
         "tilt": 10.0,               # same roof pitch
         # 10 × 220 W nameplate. MEASURED peak ≈ 2.0 kW (very close to
-        # nameplate — this string is actually performing well).
-        "effective_peak_kw": 2.0,
+        # nameplate — this string is actually performing well). Bumped to
+        # 2.2 so sub-4-min spikes + solstice gains stay under model.
+        "effective_peak_kw": 2.2,
         "capacity_kw": 2.1,
         "panel_count": 10,          # 5 per side
         "panel_layout": [5, 1],     # per-side layout: 5 cols × 1 row
