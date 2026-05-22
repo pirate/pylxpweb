@@ -595,6 +595,57 @@ def _read_loadavg():
         return None
 
 
+# -- HASS sensor proxy: pulls the first illuminance sensor's current state ---
+#
+# Uses Supervisor's Home Assistant API proxy (requires
+# homeassistant_api: true in the addon config + the SUPERVISOR_TOKEN env
+# var that the supervisor injects automatically).
+# We auto-discover by filtering for entities with unit_of_measurement="lx".
+_HASS_ILLUMINANCE_CACHE: dict = {"ts": None, "data": None}
+
+
+def _fetch_hass_illuminance():
+    """Return {value_lx, last_updated_iso, entity_id} for the first
+    illuminance sensor exposed in HASS, or None if unavailable.
+    Cached 60 seconds (sensor itself updates at minute-scale)."""
+    if (_HASS_ILLUMINANCE_CACHE["ts"]
+            and (datetime.now() - _HASS_ILLUMINANCE_CACHE["ts"]).total_seconds() < 60):
+        return _HASS_ILLUMINANCE_CACHE["data"]
+    import os, urllib.request, json as _json
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return None
+    try:
+        req = urllib.request.Request(
+            "http://supervisor/core/api/states",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            states = _json.loads(resp.read().decode())
+    except Exception as e:
+        print(f"hass illuminance fetch error: {e}", flush=True)
+        return _HASS_ILLUMINANCE_CACHE.get("data")
+
+    found = None
+    for s in states:
+        attrs = s.get("attributes") or {}
+        if attrs.get("unit_of_measurement") == "lx" or attrs.get("device_class") == "illuminance":
+            try:
+                val = float(s.get("state"))
+            except (TypeError, ValueError):
+                continue
+            found = {
+                "value_lx":         val,
+                "last_updated_iso": s.get("last_updated"),
+                "entity_id":        s.get("entity_id"),
+            }
+            break
+
+    _HASS_ILLUMINANCE_CACHE["ts"] = datetime.now()
+    _HASS_ILLUMINANCE_CACHE["data"] = found
+    return found
+
+
 # =============================================================================
 # INVERTER DATA FETCHING
 # =============================================================================
@@ -1033,6 +1084,10 @@ HTML_TEMPLATE = '''
         }
         .top-bar-weather .weather-temp  { color: #f1c40f; }
         .top-bar-weather .weather-cloud { color: #95a5a6; }
+        /* Illuminance from HASS Zigbee sensor — green if fresh, grey if stale. */
+        .top-bar-weather .weather-lux            { color: #95a5a6; }
+        .top-bar-weather .weather-lux.lux-fresh  { color: #2ecc71; }
+        .top-bar-weather .weather-lux.lux-stale  { color: #707070; }
         .top-bar-host {
             display: flex;
             justify-content: flex-end;
@@ -1841,6 +1896,7 @@ HTML_TEMPLATE = '''
         <div id="top-bar-weather" class="top-bar-weather">
             <span class="weather-temp" id="weather-temp">--</span>
             <span class="weather-cloud" id="weather-cloud">--</span>
+            <span class="weather-lux" id="weather-lux" title="Live illuminance sensor (HASS)">--</span>
         </div>
         <div id="top-bar-clock" class="top-bar-clock">--:--:--</div>
         <div id="top-bar-host" class="top-bar-host">
@@ -3484,6 +3540,20 @@ HTML_TEMPLATE = '''
                     }
                     if (cEl) cEl.textContent = (w.cloud_pct != null) ? `${w.cloud_pct}% ☁` : '--';
                 }
+                // HASS illuminance sensor (Zigbee) — green if last update is
+                // within 30 min, grey otherwise. Not used in the model.
+                if (data.illuminance && typeof data.illuminance.value_lx === 'number') {
+                    const lux = data.illuminance.value_lx;
+                    const ts = data.illuminance.last_updated_iso
+                        ? new Date(data.illuminance.last_updated_iso) : null;
+                    const ageMin = ts ? (Date.now() - ts.getTime()) / 60000 : Infinity;
+                    const fresh = ageMin <= 30;
+                    const el = document.getElementById('weather-lux');
+                    el.textContent = `${Math.round(lux).toLocaleString()} lx`;
+                    el.classList.remove('lux-fresh', 'lux-stale');
+                    el.classList.add(fresh ? 'lux-fresh' : 'lux-stale');
+                    el.title = `Live illuminance (${ts ? ts.toLocaleTimeString() : 'unknown'})`;
+                }
                 // Host load (1-min average from /proc/loadavg)
                 if (data.host && typeof data.host.load_1m === 'number') {
                     const ld = data.host.load_1m;
@@ -4124,6 +4194,7 @@ def get_data():
         "today_money": _today_money_sync(),
         "weather": (lambda tc: {"temp_c": tc[0], "cloud_pct": tc[1]})(_fetch_weather_sync()),
         "host": (lambda la: {"load_1m": la[0]} if la else None)(_read_loadavg()),
+        "illuminance": _fetch_hass_illuminance(),
         "read_only": True,
     })
 
