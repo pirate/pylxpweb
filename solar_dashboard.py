@@ -1242,9 +1242,10 @@ HTML_TEMPLATE = '''
         .event-row {
             display: flex;
             gap: 10px;
-            padding: 6px 0;
+            padding: 3px 0;             /* compact — was 6px */
             border-bottom: 1px solid rgba(255,255,255,0.05);
             font-size: 0.85em;
+            align-items: baseline;
             transition: opacity 0.2s ease;
         }
         .event-row:last-child { border-bottom: none; }
@@ -1284,14 +1285,31 @@ HTML_TEMPLATE = '''
             min-width: 70px;
             font-variant-numeric: tabular-nums;
         }
-        .event-details { flex: 1; }
+        /* Reason on the left, meta annotation on the right — single line per
+           event for compactness. Meta truncates with ellipsis if too long. */
+        .event-details {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 6px;
+        }
         .event-reason {
             color: #e67e22;
             font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .event-meta {
             color: #888;
-            font-size: 0.88em;
+            font-size: 0.85em;
+            text-align: right;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex-shrink: 1;
         }
         .event-empty {
             color: #2ecc71;
