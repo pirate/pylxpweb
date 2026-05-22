@@ -1098,6 +1098,19 @@ HTML_TEMPLATE = '''
         /* Peak group needs visible margin on both sides so it doesn't
            crowd sunrise/sunset times. */
         .sun-times .peak-group { margin: 0 8px; }
+
+        /* TOU-period dot in the Grid card meta. Plain ● glyph + CSS color
+           — emoji 🟢/🟡/🔴 don't render reliably in the kiosk browser. */
+        .tou-dot { font-size: 0.85em; }
+        .tou-dot.tou-offpeak      { color: #2ecc71; }
+        .tou-dot.tou-partial-peak { color: #f1c40f; }
+        .tou-dot.tou-peak         { color: #e74c3c; }
+
+        /* Battery card upper-right icons — simple unicode glyphs that
+           render reliably (▮ vertical block, ⚡ lightning, ~ wave). */
+        .bat-icon  { color: #2ecc71; margin-right: 2px; font-size: 0.9em; }
+        .volt-icon { color: #f1c40f; margin-right: 2px; font-size: 0.85em; }
+        .amp-icon  { color: #3498db; margin-right: 2px; font-size: 0.9em; font-weight: 700; }
         /* Battery upper-right SOC · V · A — all three bold for legibility */
         .card-meta-tag.battery-tag {
             font-weight: 700;
@@ -1729,9 +1742,9 @@ HTML_TEMPLATE = '''
                     <div class="power-card-header">
                         <div class="label">Battery</div>
                         <div class="card-meta-tag battery-tag">
-                            <span id="battery-soc">--%</span>
-                            &nbsp;<span id="battery-voltage">-- V</span>
-                            &nbsp;<span id="battery-current">-- A</span>
+                            <span class="bat-icon">▮</span><span id="battery-soc">--%</span>
+                            &nbsp;<span class="volt-icon">⚡</span><span id="battery-voltage">-- V</span>
+                            &nbsp;<span class="amp-icon">~</span><span id="battery-current">-- A</span>
                         </div>
                     </div>
                     <div class="value battery idle" id="battery-top-power">--</div>
@@ -1756,8 +1769,8 @@ HTML_TEMPLATE = '''
                     <div class="power-card-header">
                         <div class="label">Grid</div>
                         <div class="card-meta-tag">
-                            🌡 <span id="inverter-temp">-- °C</span>
-                            &nbsp;<span id="tou-period-icon" title="TOU period">⚪</span>
+                            <span id="inverter-temp">-- °C</span>
+                            &nbsp;<span class="tou-dot" id="tou-period-icon" title="TOU period">●</span>
                             &nbsp;<span id="dollars-per-hour">--</span>
                         </div>
                     </div>
@@ -3521,12 +3534,16 @@ HTML_TEMPLATE = '''
                     const sch = data.schedule;
                     document.getElementById('op-mode').textContent = sch.operational_mode;
 
-                    // TOU period → emoji icon (red/yellow/green dot)
-                    let touIcon = '🟢', touTitle = 'off-peak';
-                    if (sch.in_peak)              { touIcon = '🔴'; touTitle = 'peak'; }
-                    else if (sch.in_partial_peak) { touIcon = '🟡'; touTitle = 'partial peak'; }
+                    // TOU period → ● dot, color via CSS class (kiosk-safe).
+                    let touCls = 'tou-offpeak', touTitle = 'off-peak';
+                    if (sch.in_peak)              { touCls = 'tou-peak'; touTitle = 'peak'; }
+                    else if (sch.in_partial_peak) { touCls = 'tou-partial-peak'; touTitle = 'partial peak'; }
                     const touEl = document.getElementById('tou-period-icon');
-                    if (touEl) { touEl.textContent = touIcon; touEl.title = touTitle; }
+                    if (touEl) {
+                        touEl.classList.remove('tou-offpeak', 'tou-partial-peak', 'tou-peak');
+                        touEl.classList.add(touCls);
+                        touEl.title = touTitle;
+                    }
 
                     // Single-line daily summary under the grid card's daily-bar:
                     //   [import kWh × import rate]   [net $]   [export kWh × export rate]
