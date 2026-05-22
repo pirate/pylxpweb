@@ -1248,11 +1248,12 @@ HTML_TEMPLATE = '''
         .mppt-zero .mppt-row {
             display: none;
         }
-        /* MPPT voltage bar — graphs string voltage from 100V (left) to 350V
-           (right). Color-coded by efficiency zone:
-              < 140V (~ < 16%) red    — below turn-on
-              140-300V (16-80%) yellow — below optimal range
-              300-350V (80-100%) green — entering optimal range */
+        /* MPPT power bar — fraction of that array's effective peak (the
+           measured max it ever produces). Same thresholds as the PV card
+           border so the colors match:
+              < 50%       red    — under-performing
+              50-75%      orange — partial
+              >= 75%      green  — close to peak */
         .mppt-voltage-bar-row {
             padding: 0 0 8px 0;
         }
@@ -1272,9 +1273,9 @@ HTML_TEMPLATE = '''
             border-radius: 2px;
             transition: width 0.4s ease, background-color 0.4s ease;
         }
-        .mppt-voltage-bar .fill.below-turnon { background: #e74c3c; }
-        .mppt-voltage-bar .fill.below-optimal { background: #f39c12; }
-        .mppt-voltage-bar .fill.optimal { background: #2ecc71; }
+        .mppt-voltage-bar .fill.pct-low  { background: #e74c3c; }
+        .mppt-voltage-bar .fill.pct-mid  { background: #e67e22; }
+        .mppt-voltage-bar .fill.pct-high { background: #2ecc71; }
         .mppt-zero-message {
             display: none;
             color: #888;
@@ -3189,35 +3190,43 @@ HTML_TEMPLATE = '''
                         el.classList.add(cls);
                     };
 
-                    // Voltage bar graph: 100V → 0% width, 350V → 100% width.
-                    // Color by zone (red below 140V turn-on, yellow below 300V optimal, green above).
-                    const VBAR_MIN = 100, VBAR_MAX = 350;
-                    const setMpptVoltageBar = (id, v) => {
+                    // Power bar — fraction of this array's effective peak
+                    // (the calibrated MAX it ever produces, time-of-day-
+                    // independent). 100% = absolutely best moment.
+                    // Color thresholds match the PV card border.
+                    const setMpptPowerBar = (id, power_w, effective_peak_kw) => {
                         const fill = document.getElementById(id);
-                        if (!fill) return;
-                        const clamped = Math.max(VBAR_MIN, Math.min(VBAR_MAX, v));
-                        const pct = (clamped - VBAR_MIN) / (VBAR_MAX - VBAR_MIN) * 100;
+                        if (!fill || !effective_peak_kw) return;
+                        const pct = Math.min(100, Math.max(0,
+                            power_w / (effective_peak_kw * 1000) * 100));
                         fill.style.width = pct.toFixed(1) + '%';
-                        fill.classList.remove('below-turnon', 'below-optimal', 'optimal');
-                        if (v > 0 && v < 140)      fill.classList.add('below-turnon');
-                        else if (v > 0 && v < 300) fill.classList.add('below-optimal');
-                        else                       fill.classList.add('optimal');
+                        fill.classList.remove('pct-low', 'pct-mid', 'pct-high');
+                        if      (pct >= 75) fill.classList.add('pct-high');
+                        else if (pct >= 50) fill.classList.add('pct-mid');
+                        else                fill.classList.add('pct-low');
                     };
+                    // Look up each array's effective_peak_kw by name
+                    const swArr = getArrayConfig('SW');
+                    const neArr = getArrayConfig('NE');
+                    const mxArr = getArrayConfig('Mixed') || getArrayConfig('Older');
+                    const swPeak = swArr ? swArr.effective_peak_kw : null;
+                    const nePeak = neArr ? neArr.effective_peak_kw : null;
+                    const mxPeak = mxArr ? mxArr.effective_peak_kw : null;
 
-                    // MPPT 1
+                    // MPPT 1 = SW (verified afternoon 2026-05-22)
                     document.getElementById('pv1').textContent = formatPower(inv.pv1_power);
                     setMpptDetail('pv1-detail', inv.pv1_voltage, inv.pv1_power);
-                    setMpptVoltageBar('pv1-voltage-fill', inv.pv1_voltage);
+                    setMpptPowerBar('pv1-voltage-fill', inv.pv1_power, swPeak);
 
-                    // MPPT 2
+                    // MPPT 2 = NE
                     document.getElementById('pv2').textContent = formatPower(inv.pv2_power);
                     setMpptDetail('pv2-detail', inv.pv2_voltage, inv.pv2_power);
-                    setMpptVoltageBar('pv2-voltage-fill', inv.pv2_voltage);
+                    setMpptPowerBar('pv2-voltage-fill', inv.pv2_power, nePeak);
 
-                    // MPPT 3
+                    // MPPT 3 = Mixed/Older
                     document.getElementById('pv3').textContent = formatPower(inv.pv3_power);
                     setMpptDetail('pv3-detail', inv.pv3_voltage, inv.pv3_power);
-                    setMpptVoltageBar('pv3-voltage-fill', inv.pv3_voltage);
+                    setMpptPowerBar('pv3-voltage-fill', inv.pv3_power, mxPeak);
 
                     const allMpptIdle = [inv.pv1_power, inv.pv2_power, inv.pv3_power]
                         .every((power) => numericPower(power) === 0);
