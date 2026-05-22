@@ -1186,6 +1186,27 @@ HTML_TEMPLATE = '''
         }
         .power-card-summary .pos { color: #2ecc71; }
         .power-card-summary .neg { color: #e74c3c; }
+        /* Events card header: card title on left, current operation
+           mode + inverter status on the right. Mirrors .power-card-header
+           styling on the top cards. */
+        .events-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+        .events-header-label {
+            color: #888;
+            font-size: 0.62em;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+        .events-header-mode {
+            color: #ddd;
+            font-size: 0.78em;
+            font-variant-numeric: tabular-nums;
+        }
+
         /* Events list: oldest events scroll up out of view, newest at the
            bottom (always in view because we scrollTop=scrollHeight after
            every render). Container is the same height as the MPPT panel
@@ -1195,6 +1216,19 @@ HTML_TEMPLATE = '''
             overflow-y: auto;
             scroll-behavior: smooth;
         }
+
+        /* Daily $ summary under the grid card's daily-bar.
+           Layout: imp formula on left, net $ in center, exp formula on right. */
+        .grid-money-row {
+            font-size: 0.7em;
+            font-variant-numeric: tabular-nums;
+            color: #888;
+        }
+        .grid-money-row .money-imp  { color: #e74c3c; opacity: 0.85; }
+        .grid-money-row .money-exp  { color: #2ecc71; opacity: 0.85; }
+        .grid-money-row .money-net  { color: #ddd; font-weight: 700; font-size: 1.15em; }
+        .grid-money-row .money-net.profit { color: #2ecc71; }
+        .grid-money-row .money-net.loss   { color: #e74c3c; }
         .event-row {
             display: flex;
             gap: 10px;
@@ -1225,6 +1259,16 @@ HTML_TEMPLATE = '''
         .event-row.event-bms .event-reason { font-weight: 600; }
         .event-row.event-bms-down .event-reason { color: #e67e22; }
         .event-row.event-bms-up .event-reason { color: #2ecc71; }
+        /* Schedule timeline events interleaved into the events list. */
+        .event-row.event-sched .event-reason { font-weight: 600; }
+        .event-row.event-sched.sched-pv_charge        .event-reason { color: #2ecc71; }
+        .event-row.event-sched.sched-forced_discharge .event-reason { color: #f39c12; }
+        .event-row.event-sched.sched-self_consumption .event-reason { color: #95a5a6; }
+        .event-row.event-sched-active {
+            background: rgba(255,255,255,0.08);
+            border-left: 3px solid #f1c40f;
+            padding-left: 8px;
+        }
         .event-time {
             color: #aaa;
             min-width: 70px;
@@ -1330,39 +1374,8 @@ HTML_TEMPLATE = '''
             height: 280px;
             margin-top: 4px;
         }
-        /* Schedule timeline — one row per scheduled window, in time order.
-           The active row is highlighted via background tint + the time
-           range gets a small "NOW" badge in front. */
-        #schedule-timeline { margin-top: 4px; }
-        .sched-row {
-            display: grid;
-            grid-template-columns: 110px 1fr;
-            gap: 8px;
-            padding: 4px 6px;
-            border-radius: 4px;
-            font-size: 0.85em;
-            font-variant-numeric: tabular-nums;
-            line-height: 1.3;
-        }
-        .sched-row + .sched-row { margin-top: 2px; }
-        .sched-row .sched-range { color: #aaa; white-space: nowrap; }
-        .sched-row .sched-body  { color: #ddd; }
-        .sched-row .sched-detail { color: #888; font-size: 0.85em; margin-left: 4px; }
-        .sched-row.sched-forced_discharge .sched-body  { color: #f39c12; font-weight: 600; }
-        .sched-row.sched-pv_charge .sched-body         { color: #2ecc71; font-weight: 600; }
-        .sched-row.sched-self_consumption .sched-body  { color: #95a5a6; }
-        .sched-row.sched-active {
-            background: rgba(255,255,255,0.08);
-            border-left: 3px solid #f1c40f;
-            padding-left: 8px;
-        }
-        .sched-row.sched-active .sched-range::before {
-            content: 'NOW ';
-            color: #f1c40f;
-            font-weight: 700;
-            margin-right: 2px;
-        }
-        .sched-row.sched-empty { color: #888; text-align: center; padding: 8px; }
+        /* Schedule timeline is now interleaved into the events list
+           via event-row.event-sched.* — no standalone container. */
         /* Combined import/export rate display: "$0.380 ⬅  ➡ $0.025" */
         .nem-rates {
             display: inline-flex;
@@ -1678,6 +1691,8 @@ HTML_TEMPLATE = '''
                         <div class="label">Grid</div>
                         <div class="card-meta-tag">
                             🌡 <span id="inverter-temp">-- °C</span>
+                            &nbsp;<span id="tou-period-icon" title="TOU period">⚪</span>
+                            &nbsp;<span id="dollars-per-hour">--</span>
                         </div>
                     </div>
                     <div class="value grid idle" id="grid-top-power">--</div>
@@ -1696,6 +1711,12 @@ HTML_TEMPLATE = '''
                     <div class="power-card-meta daily-meta">
                         <span class="meta-left"  id="grid-daily-imported">-- kWh<span class="meta-suffix">imp</span></span>
                         <span class="meta-right" id="grid-daily-exported">-- kWh<span class="meta-suffix">exp</span></span>
+                    </div>
+                    <!-- Today's $ summary: imports × import-rate ... net ... exports × export-rate -->
+                    <div class="power-card-meta grid-money-row">
+                        <span class="money-imp" id="grid-money-imp">--</span>
+                        <span class="money-net" id="grid-money-net">--</span>
+                        <span class="money-exp" id="grid-money-exp">--</span>
                     </div>
                 </div>
                 <div class="power-card" id="home-card">
@@ -1723,6 +1744,14 @@ HTML_TEMPLATE = '''
             <div class="two-col-row">
 
             <div class="section">
+                <div class="events-header">
+                    <span class="events-header-label">Events</span>
+                    <span class="events-header-mode">
+                        <span id="op-mode">--</span>
+                        &nbsp;·&nbsp;
+                        <span class="good" id="inverter-status">--</span>
+                    </span>
+                </div>
                 <div id="import-events-list">
                     <div class="event-empty">No imports in the last 24h ✓</div>
                 </div>
@@ -1758,46 +1787,9 @@ HTML_TEMPLATE = '''
 
             </div><!-- /.two-col-row -->
 
-            <!-- TOU & Mode split into two side-by-side cards via the same
-                 .two-col-row grid used above. Left card = operating mode +
-                 schedule; right card = rates + earnings. -->
-            <div class="two-col-row">
-
-            <div class="section">
-                <div class="stat-row">
-                    <span class="stat-label">Operation</span>
-                    <span class="stat-value">
-                        <span id="op-mode">--</span>
-                        &nbsp;·&nbsp;
-                        <span class="good" id="inverter-status">--</span>
-                    </span>
-                </div>
-                <div id="schedule-timeline">
-                    <div class="sched-row sched-empty">Loading schedule…</div>
-                </div>
-            </div>
-
-            <div class="section">
-                <div class="stat-row">
-                    <span class="stat-label">PG&amp;E Period</span>
-                    <span class="stat-value" id="tou-period">--</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">NEM Rates</span>
-                    <span class="stat-value nem-rates">
-                        <span class="rate-import" id="import-rate-now">--</span>
-                        <span class="rate-arrow-in">⬅</span>
-                        <span class="rate-arrow-out">➡</span>
-                        <span class="rate-export" id="export-rate-now">--</span>
-                    </span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">$/hr (estimate)</span>
-                    <span class="stat-value" id="dollars-per-hour">--</span>
-                </div>
-            </div>
-
-            </div><!-- /.two-col-row TOU split -->
+            <!-- Mode + Schedule + Rates row removed: mode/status moved to
+                 events-header, TOU period + $/hr now in the grid card,
+                 schedule transitions interleaved into the events list. -->
 
             <!-- 24h history chart: PV / Battery SOC / Grid in+out / Home -->
             <div class="section">
@@ -2271,6 +2263,18 @@ HTML_TEMPLATE = '''
             // Events from previous days get the "event-old" class which
             // significantly mutes them so today's events stand out.
             const ageCls = ev.is_today === false ? ' event-old' : '';
+            // Schedule transitions (PV charge / forced discharge / etc).
+            // Phase label color matches the kind (.sched-* classes).
+            if (ev.type === 'schedule') {
+                const activeCls = ev.active ? ' event-sched-active' : '';
+                return `<div class="event-row event-sched sched-${ev.kind}${activeCls}${ageCls}">
+                    <div class="event-time">${ev.start}</div>
+                    <div class="event-details">
+                        <div class="event-reason">${ev.reason}</div>
+                        <div class="event-meta">${ev.detail || ''}</div>
+                    </div>
+                </div>`;
+            }
             // BMS limit-change event (typically correlates with charging stop)
             if (ev.type === 'bms_charge' || ev.type === 'bms_discharge') {
                 const dir = ev.new_a < ev.prev_a ? 'down' : 'up';
@@ -2697,26 +2701,6 @@ HTML_TEMPLATE = '''
             else if (home_w > 2000) { homeColor = 'orange'; homeFillState = 'home-warm'; }
             setBorder('home-card', homeColor);
             setFills('home', homeFillState);
-        }
-
-        // Render the schedule timeline. Receives a list of events from
-        // sch.timeline (see _build_schedule_timeline server-side); each has
-        // {start, end, label, detail, kind, active}. One row per event,
-        // current row highlighted with a yellow left-border + "NOW" badge.
-        function renderScheduleTimeline(events) {
-            const container = document.getElementById('schedule-timeline');
-            if (!container || !Array.isArray(events) || events.length === 0) return;
-            const rows = events.map(e => {
-                const cls = `sched-row sched-${e.kind}${e.active ? ' sched-active' : ''}`;
-                // Compact "4p–9p" range or "now → 4p" for the active event
-                const range = e.active ? `→ ${e.end}` : `${e.start}–${e.end}`;
-                return `
-                    <div class="${cls}">
-                        <span class="sched-range">${range}</span>
-                        <span class="sched-body">${e.label}<span class="sched-detail">${e.detail}</span></span>
-                    </div>`;
-            }).join('');
-            container.innerHTML = rows;
         }
 
         function createGridService() {
@@ -3451,51 +3435,51 @@ HTML_TEMPLATE = '''
                           html: `${exp.toFixed(1)} kWh<span class="meta-suffix">exp</span>` });
                 }
 
-                // TOU + mode panel
+                // TOU + mode panel — most of this now lives in compact
+                // places: operation mode in the events-header upper-right,
+                // TOU-period icon + $/hr in the Grid card meta tag,
+                // import/export $-formula in the Grid card daily-meta row.
                 if (data.schedule) {
                     const sch = data.schedule;
                     document.getElementById('op-mode').textContent = sch.operational_mode;
 
-                    let touText = 'off-peak';
-                    if (sch.in_peak) touText = '🔴 PEAK';
-                    else if (sch.in_partial_peak) touText = '🟡 partial peak';
-                    document.getElementById('tou-period').textContent = touText;
+                    // TOU period → emoji icon (red/yellow/green dot)
+                    let touIcon = '🟢', touTitle = 'off-peak';
+                    if (sch.in_peak)              { touIcon = '🔴'; touTitle = 'peak'; }
+                    else if (sch.in_partial_peak) { touIcon = '🟡'; touTitle = 'partial peak'; }
+                    const touEl = document.getElementById('tou-period-icon');
+                    if (touEl) { touEl.textContent = touIcon; touEl.title = touTitle; }
 
-                    // Render the next-24h timeline if the server provided one
-                    if (sch.timeline) {
-                        renderScheduleTimeline(sch.timeline);
+                    // Build the daily $ summary under the grid card's daily-bar:
+                    //   [import kWh × import rate]   [net $]   [export kWh × export rate]
+                    // Uses currently-active rates as a flat approximation —
+                    // we don't have minute-by-minute rate × power history.
+                    if (sch.rates && data.inverter) {
+                        const impKwh = numericPower(data.inverter.energy_today_import) || 0;
+                        const expKwh = numericPower(data.inverter.energy_today_export) || 0;
+                        const impRate = sch.rates.currently_active_import_rate;
+                        const expRate = sch.rates.currently_active_export_rate;
+                        const impCost = impKwh * impRate;
+                        const expIncome = expKwh * expRate;
+                        const net = expIncome - impCost;
+                        document.getElementById('grid-money-imp').textContent =
+                            `${impKwh.toFixed(2)}kWh × ${(impRate*100).toFixed(1)}¢`;
+                        document.getElementById('grid-money-exp').textContent =
+                            `${expKwh.toFixed(1)}kWh × ${(expRate*100).toFixed(1)}¢`;
+                        const netEl = document.getElementById('grid-money-net');
+                        const sign = net >= 0 ? '+' : '−';
+                        netEl.textContent = `${sign}$${Math.abs(net).toFixed(2)}`;
+                        netEl.classList.toggle('profit', net >= 0);
+                        netEl.classList.toggle('loss',   net <  0);
                     }
 
-                    if (sch.rates) {
-                        // Both rates: 3 decimals, no $/kWh suffix (label conveys it).
-                        // Append a small "+Ava" badge to the export rate when the
-                        // Ava community-energy peak-export bonus is active.
-                        const exportRate = sch.rates.currently_active_export_rate;
-                        const importRate = sch.rates.currently_active_import_rate;
-                        let exportHtml = '$' + exportRate.toFixed(3);
-                        if (sch.in_ava_bonus) {
-                            exportHtml += ' <span class="rate-ava-bonus">+Ava</span>';
-                        }
-                        const expEl = document.getElementById('export-rate-now');
-                        const impEl = document.getElementById('import-rate-now');
-                        expEl.innerHTML = exportHtml;
-                        impEl.textContent = '$' + importRate.toFixed(3);
-                        // Bold whichever side reflects the current grid flow.
-                        // Threshold matches HOLD_EXPORT_LOCK_POWER (10 W) so the
-                        // active side flips at the same point the inverter does.
-                        if (data.inverter) {
-                            const exportingW = numericPower(data.inverter.power_to_grid);
-                            const importingW = numericPower(data.inverter.power_to_user);
-                            expEl.classList.toggle('active', exportingW > 10);
-                            impEl.classList.toggle('active', importingW > 10);
-                        }
-                    }
-
+                    // $/hr (estimate) in the grid card meta tag, sign-colored
                     const dph = sch.dollars_per_hour_est;
-                    if (dph != null) {
-                        const sign = dph >= 0 ? '+' : '';
-                        document.getElementById('dollars-per-hour').textContent =
-                            sign + '$' + dph.toFixed(2) + '/hr';
+                    const dphEl = document.getElementById('dollars-per-hour');
+                    if (dph != null && dphEl) {
+                        const sign = dph >= 0 ? '+' : '−';
+                        dphEl.textContent = sign + '$' + Math.abs(dph).toFixed(2) + '/hr';
+                        dphEl.style.color = dph >= 0 ? '#2ecc71' : '#e74c3c';
                     }
                 }
 
@@ -4064,6 +4048,62 @@ async def _fetch_recent_import_events():
 _fetch_today_import_events = _fetch_recent_import_events
 
 
+def _schedule_timeline_as_events(now: datetime) -> list[dict]:
+    """Convert today's remaining schedule phases into events for the
+    unified events list.
+
+    Each phase becomes one event:
+      - active phase → "NOW: <label>"   ts = now
+      - future phase → "<label> starts" ts = phase start
+    All marked is_today=True (we only emit today's remaining phases).
+    """
+    timeline = _build_schedule_timeline(now)
+    out = []
+    for phase in timeline:
+        # Phase start hour. _build_schedule_timeline clips to "now" for
+        # the active phase, so we use today's midnight + the formatted
+        # start. Simpler: take h_now if active, else parse the phase's
+        # start_h… but the formatted string is what we have.
+        # Just use the formatted start string as event start.
+        is_active = phase.get("active", False)
+        # Build ISO ts: today's date + the phase's numeric start hour.
+        # We don't have raw start_h here, so we conservatively set ts
+        # to "now" for active phases and try to recover the hour from
+        # the formatted label for future phases.
+        if is_active:
+            ts = now
+        else:
+            ts = _parse_12h_label_to_today(phase["start"], now)
+        reason = (f"⏱ NOW: {phase['label']}" if is_active
+                  else f"⏱ {phase['start']}: {phase['label']} starts")
+        out.append({
+            "type":     "schedule",
+            "ts":       ts.isoformat(),
+            "is_today": True,
+            "active":   is_active,
+            "start":    "→ " + phase["end"] if is_active else phase["start"],
+            "end":      phase["end"],
+            "kind":     phase.get("kind", "idle"),
+            "reason":   reason,
+            "detail":   phase.get("detail", ""),
+        })
+    return out
+
+
+def _parse_12h_label_to_today(label: str, now: datetime) -> datetime:
+    """Parse '4p' / '9p' / '12:30p' style label into today's datetime."""
+    import re
+    m = re.match(r"^(\d{1,2})(?::(\d{2}))?([ap])$", label.strip())
+    if not m:
+        return now
+    h = int(m.group(1))
+    mm = int(m.group(2) or 0)
+    suf = m.group(3)
+    if suf == "p" and h != 12: h += 12
+    if suf == "a" and h == 12: h = 0
+    return now.replace(hour=h, minute=mm, second=0, microsecond=0)
+
+
 async def _fetch_bms_limit_events():
     """Detect BMS-reported charge/discharge limit changes in the last 24h.
 
@@ -4202,7 +4242,10 @@ def _events_sync():
                     _fetch_today_import_events(),
                     _fetch_bms_limit_events(),
                 )
-                merged = (import_evs or []) + (bms_evs or [])
+                # Schedule timeline → events (future transitions appear
+                # interleaved with past imports + BMS changes).
+                sched_evs = _schedule_timeline_as_events(datetime.now(TIMEZONE))
+                merged = (import_evs or []) + (bms_evs or []) + sched_evs
                 # Newest first (ts is ISO, so string sort works)
                 merged.sort(key=lambda e: e.get("ts", ""), reverse=True)
                 return merged
