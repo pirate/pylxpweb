@@ -1297,11 +1297,12 @@ HTML_TEMPLATE = '''
             color: #aaa;
             font-weight: 400;
         }
-        /* BMS limit-change events: distinct color from import events.
-           Downgrade = orange (concerning), upgrade = green (recovery). */
-        .event-row.event-bms .event-reason { font-weight: 600; }
-        .event-row.event-bms-down .event-reason { color: #e67e22; }
-        .event-row.event-bms-up .event-reason { color: #2ecc71; }
+        /* BMS limit-change events: routine, no special emphasis. Same
+           neutral grey-ish color as the meta text; normal weight. */
+        .event-row.event-bms .event-reason {
+            font-weight: 400;
+            color: #aaa;
+        }
         /* Schedule timeline events interleaved into the events list. */
         .event-row.event-sched .event-reason { font-weight: 600; }
         .event-row.event-sched.sched-pv_charge        .event-reason { color: #2ecc71; }
