@@ -1217,16 +1217,15 @@ HTML_TEMPLATE = '''
             scroll-behavior: smooth;
         }
 
-        /* Daily $ summary under the grid card's daily-bar.
+        /* Single-line daily $ summary under the grid card's daily-bar.
            Layout: imp formula on left, net $ in center, exp formula on right. */
         .grid-money-row {
-            font-size: 0.7em;
             font-variant-numeric: tabular-nums;
             color: #888;
         }
-        .grid-money-row .money-imp  { color: #e74c3c; opacity: 0.85; }
-        .grid-money-row .money-exp  { color: #2ecc71; opacity: 0.85; }
-        .grid-money-row .money-net  { color: #ddd; font-weight: 700; font-size: 1.15em; }
+        .grid-money-row .money-imp  { color: #e74c3c; opacity: 0.85; font-weight: 400; font-size: 0.7em; }
+        .grid-money-row .money-exp  { color: #2ecc71; opacity: 0.85; font-weight: 400; font-size: 0.7em; }
+        .grid-money-row .money-net  { color: #ddd; font-weight: 700; }
         .grid-money-row .money-net.profit { color: #2ecc71; }
         .grid-money-row .money-net.loss   { color: #e74c3c; }
         .event-row {
@@ -1708,15 +1707,11 @@ HTML_TEMPLATE = '''
                         <div class="fill-left"  id="grid-daily-left"  style="width: 0%"></div>
                         <div class="fill-right" id="grid-daily-right" style="width: 0%"></div>
                     </div>
-                    <div class="power-card-meta daily-meta">
-                        <span class="meta-left"  id="grid-daily-imported">-- kWh<span class="meta-suffix">imp</span></span>
-                        <span class="meta-right" id="grid-daily-exported">-- kWh<span class="meta-suffix">exp</span></span>
-                    </div>
-                    <!-- Today's $ summary: imports × import-rate ... net ... exports × export-rate -->
-                    <div class="power-card-meta grid-money-row">
-                        <span class="money-imp" id="grid-money-imp">--</span>
-                        <span class="money-net" id="grid-money-net">--</span>
-                        <span class="money-exp" id="grid-money-exp">--</span>
+                    <!-- Daily summary: imports × import-rate · net $ · exports × export-rate (one line) -->
+                    <div class="power-card-meta daily-meta grid-money-row">
+                        <span class="meta-left money-imp"  id="grid-daily-imported">--</span>
+                        <span class="money-net"            id="grid-money-net">--</span>
+                        <span class="meta-right money-exp" id="grid-daily-exported">--</span>
                     </div>
                 </div>
                 <div class="power-card" id="home-card">
@@ -3427,12 +3422,12 @@ HTML_TEMPLATE = '''
                         { id: 'battery-daily-charged',
                           html: `${chg.toFixed(1)} kWh<span class="meta-suffix">in</span>` });
                     // Grid: export target = expectedDaily/2 (matches the original
-                    // single-sided bar). Import target same so visual scale matches.
-                    setDailyBidi('grid', imp, exp, exportTarget,
-                        { id: 'grid-daily-imported',
-                          html: `${imp.toFixed(1)} kWh<span class="meta-suffix">imp</span>` },
-                        { id: 'grid-daily-exported',
-                          html: `${exp.toFixed(1)} kWh<span class="meta-suffix">exp</span>` });
+                    // single-sided bar). The left/right text spans get written
+                    // below in the schedule.rates block with rate annotations.
+                    const gridLeftPct  = exportTarget > 0 ? Math.min(50, imp / exportTarget * 50) : 0;
+                    const gridRightPct = exportTarget > 0 ? Math.min(50, exp / exportTarget * 50) : 0;
+                    document.getElementById('grid-daily-left').style.width  = gridLeftPct.toFixed(1) + '%';
+                    document.getElementById('grid-daily-right').style.width = gridRightPct.toFixed(1) + '%';
                 }
 
                 // TOU + mode panel — most of this now lives in compact
@@ -3450,7 +3445,7 @@ HTML_TEMPLATE = '''
                     const touEl = document.getElementById('tou-period-icon');
                     if (touEl) { touEl.textContent = touIcon; touEl.title = touTitle; }
 
-                    // Build the daily $ summary under the grid card's daily-bar:
+                    // Single-line daily summary under the grid card's daily-bar:
                     //   [import kWh × import rate]   [net $]   [export kWh × export rate]
                     // Uses currently-active rates as a flat approximation —
                     // we don't have minute-by-minute rate × power history.
@@ -3459,12 +3454,10 @@ HTML_TEMPLATE = '''
                         const expKwh = numericPower(data.inverter.energy_today_export) || 0;
                         const impRate = sch.rates.currently_active_import_rate;
                         const expRate = sch.rates.currently_active_export_rate;
-                        const impCost = impKwh * impRate;
-                        const expIncome = expKwh * expRate;
-                        const net = expIncome - impCost;
-                        document.getElementById('grid-money-imp').textContent =
+                        const net = (expKwh * expRate) - (impKwh * impRate);
+                        document.getElementById('grid-daily-imported').textContent =
                             `${impKwh.toFixed(2)}kWh × ${(impRate*100).toFixed(1)}¢`;
-                        document.getElementById('grid-money-exp').textContent =
+                        document.getElementById('grid-daily-exported').textContent =
                             `${expKwh.toFixed(1)}kWh × ${(expRate*100).toFixed(1)}¢`;
                         const netEl = document.getElementById('grid-money-net');
                         const sign = net >= 0 ? '+' : '−';
