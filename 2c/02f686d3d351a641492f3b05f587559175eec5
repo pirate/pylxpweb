@@ -1,0 +1,41 @@
+apply_self_consumption.py
+  s_5a300c8feab054::t_a9b68f848c6ad7 56-59
+  s_5a300c8feab054::t_6be0c4778a3572 1-55,60-86
+addon-solar_dashboard/config.yaml
+  s_5a300c8feab054::t_9e0b6e3fde371f 2
+fix_battery_limits.py
+  s_5a300c8feab054::t_3513f4d8c53708 74-79
+apply_restore_export.py
+  s_5a300c8feab054::t_e2199dd8b96ba9 1-93
+solar_dashboard.py
+  s_5a300c8feab054::t_cb7ed9a2c94aa9 1880-1882
+  s_5a300c8feab054::t_b6682464f30db6 3618-3619
+  s_5a300c8feab054::t_7bfa74b57c1a4f 1771-1777
+  s_5a300c8feab054::t_ad290c00f47396 2969
+  s_5a300c8feab054::t_97c938b91ee89d 3472-3473,3477-3478
+  s_5a300c8feab054::t_a93997f89e90de 1811-1850,1854,1858,1861-1863,1867
+  s_5a300c8feab054::t_229581700e6a48 3362-3370
+  s_5a300c8feab054::t_595627bb85a667 3577-3585
+  s_5a300c8feab054::t_beee94458b2c20 3052-3069
+  s_5a300c8feab054::t_9e285d4c373597 3621,3624,3627-3630
+addon-solar_dashboard/solar_dashboard.py
+  s_5a300c8feab054::t_8f5dc2db6d0b4c 1880-1882,2969,3052-3069,3362-3370,3472-3473,3477-3478,3621,3624,3627-3630
+  s_5a300c8feab054::t_5b4d83128bf4f1 1771-1777,1811-1850,1854,1858,1861-1863,1867
+  s_5a300c8feab054::t_e497761144a0d7 3577-3585,3618-3619
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "2c02f686d3d351a641492f3b05f587559175eec5",
+  "prompts": {},
+  "sessions": {
+    "s_5a300c8feab054": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb927930-58d5-41d1-8103-42fcc934a2f7",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Nick Sweeting <git@sweeting.me>"
+    }
+  }
+}
