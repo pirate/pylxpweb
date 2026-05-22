@@ -1175,14 +1175,30 @@ HTML_TEMPLATE = '''
         }
         .power-card-summary .pos { color: #2ecc71; }
         .power-card-summary .neg { color: #e74c3c; }
+        /* Events list: oldest events scroll up out of view, newest at the
+           bottom (always in view because we scrollTop=scrollHeight after
+           every render). Container is the same height as the MPPT panel
+           so they balance side-by-side. */
+        #import-events-list {
+            max-height: 220px;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
         .event-row {
             display: flex;
             gap: 10px;
             padding: 6px 0;
             border-bottom: 1px solid rgba(255,255,255,0.05);
             font-size: 0.85em;
+            transition: opacity 0.2s ease;
         }
         .event-row:last-child { border-bottom: none; }
+        /* Older-than-today events: heavily muted so today stands out. */
+        .event-row.event-old {
+            opacity: 0.4;
+            font-size: 0.78em;
+        }
+        .event-row.event-old .event-reason { font-weight: 400; }
         /* BMS limit-change events: distinct color from import events.
            Downgrade = orange (concerning), upgrade = green (recovery). */
         .event-row.event-bms .event-reason { font-weight: 600; }
@@ -2210,18 +2226,26 @@ HTML_TEMPLATE = '''
                                        + unaccountedNote;
                     return;
                 }
-                // Server already returns newest-first
-                listEl.innerHTML = data.events.map(renderEvent).join('') + unaccountedNote;
+                // Render oldest at top, newest at bottom (chronological). The
+                // server returns newest-first so we reverse for display.
+                // The container is overflow-scrollable; we scroll to the
+                // bottom so the most-recent event is always in view.
+                listEl.innerHTML = data.events.slice().reverse().map(renderEvent).join('')
+                                   + unaccountedNote;
+                listEl.scrollTop = listEl.scrollHeight;
             } catch (err) {
                 console.error('events fetch failed:', err);
             }
         }
 
         function renderEvent(ev) {
+            // Events from previous days get the "event-old" class which
+            // significantly mutes them so today's events stand out.
+            const ageCls = ev.is_today === false ? ' event-old' : '';
             // BMS limit-change event (typically correlates with charging stop)
             if (ev.type === 'bms_charge' || ev.type === 'bms_discharge') {
                 const dir = ev.new_a < ev.prev_a ? 'down' : 'up';
-                return `<div class="event-row event-bms event-bms-${dir}">
+                return `<div class="event-row event-bms event-bms-${dir}${ageCls}">
                     <div class="event-time">${ev.start}</div>
                     <div class="event-details">
                         <div class="event-reason">⚡ ${ev.reason}</div>
@@ -2232,7 +2256,7 @@ HTML_TEMPLATE = '''
             const timeStr = ev.duration_min > 5 ? `${ev.start}–${ev.end}` : ev.start;
             const socStr = ev.soc != null ? ` · SOC ${ev.soc}%` : '';
             const pvStr = ev.ppv != null && ev.ppv > 100 ? ` · PV ${(ev.ppv/1000).toFixed(1)}kW` : '';
-            return `<div class="event-row">
+            return `<div class="event-row${ageCls}">
                 <div class="event-time">${timeStr}</div>
                 <div class="event-details">
                     <div class="event-reason">${ev.reason}</div>
@@ -3994,6 +4018,7 @@ async def _fetch_recent_import_events():
         out.append({
             "type": "import",
             "ts": ts_start.isoformat(),    # for cross-event sort
+            "is_today": ts_start.date() == datetime.now(TIMEZONE).date(),
             "start": date_prefix + _fmt_12h(ts_start),
             "end":   date_prefix + _fmt_12h(ts_end),
             "duration_min": round(dur_min, 1),
@@ -4087,6 +4112,7 @@ async def _fetch_bms_limit_events():
                 out.append({
                     "type":   kind,
                     "ts":     ts.isoformat(),
+                    "is_today": ts.date() == today,
                     "start":  date_prefix + _fmt_12h(ts),
                     "end":    date_prefix + _fmt_12h(ts),
                     "reason": f"{label_singular} {direction} {prev_val:.0f}A → {v:.0f}A",
