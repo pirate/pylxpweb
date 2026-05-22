@@ -118,6 +118,17 @@ for i in $(seq 1 18); do
     echo "    [$((i*5))s] version=$V  state=$S"
     if [[ "$V" == "$LOCAL_VERSION" && "$S" == "started" ]]; then
         echo "✓ deploy complete: version=$V state=$S"
+        # --- 5. tell the HAOSKiosk addon to hard-refresh its browser so we
+        # see the new HTML/JS/CSS immediately. Without this, luakit serves
+        # the cached page until its own browser_refresh timer fires
+        # (currently configured to 10 min). REST API on 127.0.0.1:8080 is
+        # exposed from the kiosk addon and reachable from the SSH addon.
+        echo "→ asking HAOSKiosk to refresh browser"
+        if ssh "$HOST" "curl -fsS -X POST http://127.0.0.1:8080/refresh_browser" >/dev/null 2>&1; then
+            echo "✓ kiosk refreshed"
+        else
+            echo "  (kiosk refresh failed — not fatal; will refresh on its own timer)"
+        fi
         exit 0
     fi
 done
