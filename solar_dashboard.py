@@ -93,6 +93,7 @@ SOLAR_ARRAYS = [
         "azimuth": 37.0,
         "tilt": 10.0,
         "capacity_kw": 7.7,
+        "vmp_typical": 245,       # observed string Vmp at peak — sub-optimal
         "panel_count": 14,
         "panel_layout": [7, 2],
         "color": 0x9b59b6,        # Purple
@@ -105,6 +106,7 @@ SOLAR_ARRAYS = [
         "azimuth": 217.0,
         "tilt": 10.0,
         "capacity_kw": 7.7,
+        "vmp_typical": 256,       # observed string Vmp at peak — sub-optimal
         "panel_count": 14,
         "panel_layout": [7, 2],
         "color": 0x3498db,        # Blue
@@ -127,6 +129,7 @@ SOLAR_ARRAYS = [
         "fractions": [0.5, 0.5],    # equal split
         "tilt": 10.0,               # same roof pitch
         "capacity_kw": 2.1,         # aspirational: clean older 10 × 220 W string
+        "vmp_typical": 150,         # observed string Vmp ~135-160V — just above turn-on
         "panel_count": 10,          # 5 per side
         "panel_layout": [5, 1],     # per-side layout: 5 cols × 1 row
         "color": 0x27ae60,          # Green
@@ -152,34 +155,47 @@ RIDGELINE_AZIMUTH = (_sw_array["azimuth"] - 90) if _sw_array else 127.0
 # System efficiency — aspirational model.
 # Represents the best realistic case if everything were optimal:
 #   - Panels perfectly clean (no soiling losses)
-# Two-tier model:
-#   instantaneous "expected_power" → clear-sky peak (PV bar % never >100%)
-#   daily "expected_daily_kwh"     → typical good-day total (~85 kWh max)
-# The difference between them is the "daily availability factor" — how much
-# of the clear-sky theoretical max we actually realize over a full day,
-# averaging the marine layer mornings, occasional afternoon clouds, etc.
+# SYSTEM_EFFICIENCY here is just inverter + DC-side wiring + minor module
+# mismatch. The DOMINANT loss in this install is sub-optimal MPPT voltage
+# (we run ~250 V strings into an inverter whose efficiency peaks at
+# ~400-500 V Vmp). That's modeled separately per-array via
+# mppt_voltage_efficiency() below so the cause is identifiable, not
+# rolled into a fudge constant.
+SYSTEM_EFFICIENCY = 0.96
 
-#   - Inverter efficiency at peak (~96%)
-#   - Wiring + connector losses (~2%)
-#   - Module mismatch + DC/AC ratio (~2%)
-# Combined → ~0.92 effective peak-conditions derate. Soiling and old-string
-# losses are NOT in here — those apply more strongly over a full day, so
-# they're rolled into DAILY_AVAIL_FACTOR below.
-SYSTEM_EFFICIENCY = 0.92
-
-# Standard Bird-Hulstrom clear-sky transmittance (Sahara-clear). Used for
-# the instantaneous calculation so peak matches measured noon DNI.
+# Standard Bird-Hulstrom clear-sky transmittance. The user has confirmed
+# Oakland-area sky is consistently clear; no atmospheric-availability
+# fudge factor on top of this.
 ATMOS_TRANSMITTANCE = 0.70
 
-# Diffuse fraction of GHI on tilted panels. 0.15 is realistic for coastal CA.
+# Diffuse fraction of GHI on tilted panels — realistic 15% for our 10°
+# roof tilt.
 DIFFUSE_FRACTION_OF_GHI = 0.15
 
-# Fraction of the raw clear-sky daily integral that we typically realize.
-# Captures the marine layer mornings, soiling, the older-MPPT3 string,
-# afternoon haze, etc. — i.e. the losses that are stronger in aggregate
-# than at instantaneous peak. Calibrated so a "great" day comes out at ~85
-# kWh on our 17.6 kW system.
-DAILY_AVAIL_FACTOR = 0.70
+
+def mppt_voltage_efficiency(vmp: float) -> float:
+    """Efficiency of the inverter's DC-DC stage at a given string Vmp.
+
+    FlexBOSS21 (and most string hybrids) hit peak DC-DC efficiency in the
+    400-500 V Vmp range. Below that the converter has to step down a
+    wider ratio (Vmp → ~50 V battery bus) and the per-watt switching
+    losses go up. Our system runs ~245-256 V on MPPT1/2 and ~135 V on
+    MPPT3, well below optimal — that's the dominant non-physics loss.
+
+    Piecewise-linear approximation of a typical S-curve:
+        ≤140 V       : 0      (below turn-on; inverter ignores the string)
+        140 → 250 V  : 0.55 → 0.75    (functional but lossy)
+        250 → 400 V  : 0.75 → 0.96    (climbing toward sweet spot)
+        400 → 580 V  : 0.96 → 0.99    (sweet spot)
+        >580 V       : 0      (above max; would fault out)
+    """
+    if vmp <= 140 or vmp > 580:
+        return 0.0
+    if vmp <= 250:
+        return 0.55 + (vmp - 140) / (250 - 140) * (0.75 - 0.55)
+    if vmp <= 400:
+        return 0.75 + (vmp - 250) / (400 - 250) * (0.96 - 0.75)
+    return 0.96 + (vmp - 400) / (580 - 400) * (0.99 - 0.96)
 
 # Inverter credentials — sourced from addon options / env / .env file
 INVERTER_CONFIG = {
@@ -3605,12 +3621,15 @@ def get_data():
                 array["tilt"], array["azimuth"], dni,
             )
         # Cell heating derate (depends on per-array plane-of-array irradiance)
-        # + cloud cover (currently 1.0 — extend with weather API later).
+        # + cloud cover (currently 1.0 — extend with weather API later)
+        # + MPPT voltage efficiency (per-array, the dominant non-physics loss
+        #   on this install — strings run far below the inverter's sweet spot).
         temp_factor  = pv_temperature_derate(irradiance)
         cloud_factor = DEFAULT_CLOUD_FACTOR
-        # Convert irradiance to power: capacity * (G/1000) * system_eff * temp * cloud
+        mppt_factor  = mppt_voltage_efficiency(array.get("vmp_typical", 450))
         array_power = (array["capacity_kw"] * 1000 * (irradiance / 1000)
-                       * SYSTEM_EFFICIENCY * temp_factor * cloud_factor)
+                       * SYSTEM_EFFICIENCY * temp_factor * cloud_factor
+                       * mppt_factor)
         expected_power += array_power
 
     # Get inverter data (cached or fresh)
@@ -3696,9 +3715,10 @@ def _ensure_today_cumulative(date):
                             array["tilt"], array["azimuth"], dni)
                     temp_factor = pv_temperature_derate(irr)
                     cloud_factor = DEFAULT_CLOUD_FACTOR
+                    mppt_factor = mppt_voltage_efficiency(array.get("vmp_typical", 450))
                     slot_power_w += (array["capacity_kw"] * 1000 * (irr / 1000)
                                      * SYSTEM_EFFICIENCY * temp_factor
-                                     * cloud_factor)
+                                     * cloud_factor * mppt_factor)
             running_wh += slot_power_w * 0.5   # 30-min slot, Wh
             cumulative.append(running_wh)
 
@@ -3708,39 +3728,31 @@ def _ensure_today_cumulative(date):
 
 
 def _expected_daily_kwh_for(date):
-    """Full-day expected kWh, scaled by DAILY_AVAIL_FACTOR.
+    """Full-day expected kWh — last entry of the cumulative curve.
 
-    The raw cumulative integral assumes perfect clear-sky all day —
-    realistic for the instantaneous peak but optimistic across a full
-    day's worth of marine layer + haze + occasional clouds. We multiply
-    by DAILY_AVAIL_FACTOR so the daily ceiling represents a typical
-    good day, not the theoretical clear-sky max.
+    Single unified model: the cumulative curve already incorporates the
+    altitude-dependent atmospheric_clearness factor, so the daily total
+    and the instantaneous expected_power use the exact same math.
     """
     cum = _ensure_today_cumulative(date)
-    return (cum[-1] / 1000.0 * DAILY_AVAIL_FACTOR) if cum else 0.0
+    return (cum[-1] / 1000.0) if cum else 0.0
 
 
 def _expected_kwh_so_far(now: datetime) -> float:
-    """Expected kWh produced from start-of-day up to `now`, interpolated.
-
-    Scaled by the same DAILY_AVAIL_FACTOR so it stays comparable to the
-    daily-total reference. The white-tick on the PV daily-bar lines up
-    with the model's expectation of "where you should be by now"
-    against the realistic daily ceiling, not the clear-sky theoretical.
-    """
+    """Expected kWh produced from start-of-day up to `now`, interpolated."""
     cum = _ensure_today_cumulative(now.date())
     if not cum:
         return 0.0
     slot_idx_float = (now.hour + now.minute / 60.0) * 2
     if slot_idx_float >= len(cum):
-        return cum[-1] / 1000.0 * DAILY_AVAIL_FACTOR
+        return cum[-1] / 1000.0
     if slot_idx_float <= 0:
         return 0.0
     low = int(slot_idx_float)
     high = min(low + 1, len(cum) - 1)
     frac = slot_idx_float - low
     interp_wh = cum[low] + frac * (cum[high] - cum[low])
-    return interp_wh / 1000.0 * DAILY_AVAIL_FACTOR
+    return interp_wh / 1000.0
 
 
 # Cache today's events for 60s to avoid hammering the inverter API
