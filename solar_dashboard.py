@@ -539,6 +539,51 @@ def pv_temperature_derate(irradiance_w_per_m2: float, ambient_c: float = ASSUMED
 DEFAULT_CLOUD_FACTOR = 1.0
 
 
+# -- Weather (Open-Meteo, free, no API key) -----------------------------------
+#
+# Pulled every 15 min so we can use real outside temp in pv_temperature_derate
+# and real cloud cover in the irradiance model. Cached so we don't beat up the
+# free API.
+_WEATHER_CACHE = {"ts": None, "temp_c": None, "cloud_pct": None}
+
+
+def _fetch_weather_sync():
+    """Pull current outdoor temperature + cloud cover from Open-Meteo for
+    our lat/lon. Returns (temp_c, cloud_pct) or (None, None) on failure.
+    Cached 15 min."""
+    if (_WEATHER_CACHE["ts"]
+            and (datetime.now() - _WEATHER_CACHE["ts"]).total_seconds() < 900):
+        return _WEATHER_CACHE["temp_c"], _WEATHER_CACHE["cloud_pct"]
+    import urllib.request, json as _json
+    try:
+        url = (
+            "https://api.open-meteo.com/v1/forecast"
+            f"?latitude={LATITUDE}&longitude={LONGITUDE}"
+            "&current=temperature_2m,cloud_cover"
+            "&temperature_unit=celsius&timezone=auto"
+        )
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            data = _json.loads(resp.read().decode())
+        cur = data.get("current") or {}
+        temp_c = cur.get("temperature_2m")
+        cloud_pct = cur.get("cloud_cover")
+        _WEATHER_CACHE.update({
+            "ts": datetime.now(),
+            "temp_c": temp_c,
+            "cloud_pct": cloud_pct,
+        })
+        return temp_c, cloud_pct
+    except Exception as e:
+        print(f"weather fetch error: {e}", flush=True)
+        return _WEATHER_CACHE.get("temp_c"), _WEATHER_CACHE.get("cloud_pct")
+
+
+# Note: the fetched temp + cloud values are DISPLAYED on the dashboard but
+# NOT yet wired into pv_temperature_derate / the cloud factor in the model.
+# The calibration has been carefully tuned against measured production; the
+# user can flip these into the model later if desired.
+
+
 # =============================================================================
 # INVERTER DATA FETCHING
 # =============================================================================
@@ -948,7 +993,37 @@ HTML_TEMPLATE = '''
             color: #fff;
             overflow: hidden;
         }
-        #container { display: flex; height: 100vh; }
+        /* Top bar: thin strip at the very top of the page with the live
+           clock centered (bold) and the model's ambient-weather values
+           to the side. Sits ABOVE the main #container which fills the
+           remaining viewport height. */
+        #top-bar {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            padding: 6px 16px;
+            background: rgba(0,0,0,0.5);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .top-bar-clock {
+            font-size: 1.4em;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            color: #fff;
+            text-align: center;
+            letter-spacing: 0.02em;
+        }
+        .top-bar-weather {
+            display: flex;
+            gap: 14px;
+            font-size: 0.9em;
+            font-variant-numeric: tabular-nums;
+            color: #ddd;
+        }
+        .top-bar-weather .weather-temp  { color: #f1c40f; }
+        .top-bar-weather .weather-cloud { color: #95a5a6; }
+        /* Main container fills viewport minus the top bar */
+        #container { display: flex; height: calc(100vh - 38px); }
         #canvas-container { flex: 1; position: relative; }
         #stats-panel {
             width: 380px;
@@ -1738,6 +1813,16 @@ HTML_TEMPLATE = '''
     </style>
 </head>
 <body>
+    <!-- Top bar: live clock + ambient weather (the values the solar
+         model uses for temperature derate + cloud factor). -->
+    <div id="top-bar">
+        <div id="top-bar-weather" class="top-bar-weather">
+            <span class="weather-temp" id="weather-temp">-- °C</span>
+            <span class="weather-cloud" id="weather-cloud">-- ☁</span>
+        </div>
+        <div id="top-bar-clock" class="top-bar-clock">--:--:--</div>
+        <div id="top-bar-spacer"></div>
+    </div>
     <div id="container">
         <div id="canvas-container">
             <div id="loading">Loading 3D scene...</div>
@@ -2181,6 +2266,23 @@ HTML_TEMPLATE = '''
             // History chart — refresh every 5 min (4-min source resolution)
             fetchHistory();
             setInterval(fetchHistory, 5 * 60 * 1000);
+            // Live clock — tick every second
+            updateClock();
+            setInterval(updateClock, 1000);
+        }
+
+        function updateClock() {
+            const now = new Date();
+            let h = now.getHours();
+            const m = now.getMinutes();
+            const s = now.getSeconds();
+            const suffix = h >= 12 ? 'PM' : 'AM';
+            h = h % 12 || 12;
+            const clk = document.getElementById('top-bar-clock');
+            if (clk) {
+                clk.textContent =
+                    h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + ' ' + suffix;
+            }
         }
 
         let historyChart;
@@ -3345,6 +3447,15 @@ HTML_TEMPLATE = '''
                     document.getElementById('sunset').textContent = formatTime(data.sun.sunset_hour);
                 }
 
+                // Top-bar weather: outside temp + cloud cover (from Open-Meteo)
+                if (data.weather) {
+                    const w = data.weather;
+                    const tEl = document.getElementById('weather-temp');
+                    const cEl = document.getElementById('weather-cloud');
+                    if (tEl) tEl.textContent = (w.temp_c != null) ? `${w.temp_c.toFixed(1)}°C` : '--';
+                    if (cEl) cEl.textContent = (w.cloud_pct != null) ? `${w.cloud_pct}% ☁` : '--';
+                }
+
                 // Update sun arc with real path data (only once per session)
                 if (data.sun_path && !sunArcInitialized) {
                     updateSunArc(data.sun_path);
@@ -3973,6 +4084,7 @@ def get_data():
         # − pToUser × import-rate at each 4-min sample using the rate
         # window in effect at that sample's timestamp).
         "today_money": _today_money_sync(),
+        "weather": (lambda tc: {"temp_c": tc[0], "cloud_pct": tc[1]})(_fetch_weather_sync()),
         "read_only": True,
     })
 
