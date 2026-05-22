@@ -1111,11 +1111,25 @@ HTML_TEMPLATE = '''
             font-size: 0.9em;
         }
         .performance-bar {
+            position: relative;        /* positioning context for .progress-indicator */
             height: 8px;
             background: rgba(255,255,255,0.1);
             border-radius: 4px;
             overflow: hidden;
             margin-top: 10px;
+        }
+        /* White vertical tick on a daily-bar marking "where you should be".
+           Used by the PV bar (cumulative model integral) and the Home bar
+           (linear time-of-day reference). Drawn on top of the .fill. */
+        .performance-bar .progress-indicator {
+            position: absolute;
+            top: 0; bottom: 0;            /* full bar height (bar has overflow:hidden) */
+            width: 2px;
+            background: rgba(255,255,255,0.95);
+            z-index: 2;
+            pointer-events: none;
+            transform: translateX(-1px);  /* center the 2px line on the % point */
+            transition: left 0.5s ease;
         }
         .performance-bar.daily-bar {
             height: 6px;
@@ -1490,6 +1504,7 @@ HTML_TEMPLATE = '''
                     </div>
                     <div class="performance-bar daily-bar">
                         <div class="fill" id="pv-daily-fill" style="width: 0%"></div>
+                        <div class="progress-indicator" id="pv-daily-indicator" style="left: 0%" title="Where the model says you should be by now"></div>
                     </div>
                     <div class="power-card-meta daily-meta">
                         <span id="pv-daily-text" style="color:#f39c12;">--</span>
@@ -1560,6 +1575,7 @@ HTML_TEMPLATE = '''
                     </div>
                     <div class="performance-bar daily-bar">
                         <div class="fill home" id="home-daily-fill" style="width: 0%"></div>
+                        <div class="progress-indicator" id="home-daily-indicator" style="left: 0%" title="Linear time-of-day reference (45 kWh/24h)"></div>
                     </div>
                     <div class="power-card-meta daily-meta">
                         <span id="home-daily-text" style="color:#1abc9c;">--</span>
@@ -3177,6 +3193,25 @@ HTML_TEMPLATE = '''
                     document.getElementById('home-daily-target').textContent =
                         `of ${homeBudget.toFixed(0)} kWh`;
 
+                    // "Where you should be" indicators on the daily bars.
+                    //
+                    // PV: model-integrated expected kWh from start-of-day to
+                    //     now, expressed as % of full-day expected. Non-linear
+                    //     curve (peaks at solar noon).
+                    // Home: linear time-of-day reference — 45 kWh / 24h means
+                    //       50% at noon, 100% at midnight.
+                    const expSoFar = numericPower(data.expected_kwh_so_far);
+                    const pvIndPct = expectedDaily > 0
+                        ? Math.min(100, expSoFar / expectedDaily * 100) : 0;
+                    document.getElementById('pv-daily-indicator').style.left =
+                        pvIndPct.toFixed(1) + '%';
+
+                    const _now = new Date();
+                    const minSinceMidnight = _now.getHours() * 60 + _now.getMinutes();
+                    const homeIndPct = minSinceMidnight / 1440 * 100;
+                    document.getElementById('home-daily-indicator').style.left =
+                        homeIndPct.toFixed(1) + '%';
+
                     // Bidirectional daily bars: Battery (chg/dis), Grid (exp/imp).
                     // Each half is 50% wide max → value scales to that half.
                     const setDailyBidi = (kind, leftVal, rightVal, target,
@@ -3565,6 +3600,10 @@ def get_data():
         "sun_path": sun_path,
         "expected_power": expected_power,
         "expected_daily_kwh": _expected_daily_kwh_for(now.date()),
+        # How much we *should* have produced by this exact moment
+        # (cumulative integral of the model up to "now"). Used to draw
+        # the white "where you should be" tick on the PV daily-bar.
+        "expected_kwh_so_far": _expected_kwh_so_far(now),
         "total_battery_kwh": TOTAL_BATTERY_KWH,
         "dni": dni,
         "inverter": inverter_data,
@@ -3573,57 +3612,94 @@ def get_data():
     })
 
 
-# Cache the expected daily kWh (changes only when date changes)
-_EXPECTED_DAILY_CACHE = {"date": None, "kwh": 0.0}
+# Cache today's cumulative expected-kWh curve (one entry per 30-min slot,
+# 48 entries total). Used by:
+#   - _expected_daily_kwh_for(date)   → last entry / 1000
+#   - _expected_kwh_so_far(now)       → interpolated lookup at h_now
+_EXPECTED_CUMULATIVE_CACHE = {"date": None, "cumulative_wh": []}
 
 
-def _expected_daily_kwh_for(date):
-    """Integrate the aspirational expected-power model across the daylight hours
-    to get a daily kWh ceiling. Used as the denominator for the daily-total bars
-    on the dashboard cards. Cached per-date."""
-    cache = _EXPECTED_DAILY_CACHE
+def _ensure_today_cumulative(date):
+    """Build (and cache) a 48-element cumulative expected-Wh array for `date`.
+
+    cumulative_wh[i] = total expected energy produced from 00:00 through the
+    *end* of the 30-min slot starting at i*30 minutes. So
+    cumulative_wh[-1] is the full-day expected energy in Wh.
+
+    Includes the temperature derate + cloud factor so the cumulative curve
+    matches the per-instant `expected_power` model exactly.
+    """
+    cache = _EXPECTED_CUMULATIVE_CACHE
     iso = date.isoformat()
     if cache["date"] == iso:
-        return cache["kwh"]
+        return cache["cumulative_wh"]
 
-    total_wh = 0.0
-    # Sample every 30 min; sum (power × time-slot) = energy
+    cumulative: list[float] = []
+    running_wh = 0.0
     for hour in range(24):
         for minute in (0, 30):
             t = datetime(date.year, date.month, date.day, hour, minute,
                          tzinfo=TIMEZONE)
             pos = calculate_solar_position(t, LATITUDE, LONGITUDE)
-            if pos["altitude"] <= 0:
-                continue
-            dni = calculate_clear_sky_dni(pos["altitude"])
             slot_power_w = 0.0
-            for array in SOLAR_ARRAYS:
-                if array.get("type") == "split":
-                    azimuths = array["azimuth"]
-                    fractions = array.get("fractions",
-                                          [1.0 / len(azimuths)] * len(azimuths))
-                    irr = sum(
-                        f * calculate_panel_irradiance(
+            if pos["altitude"] > 0:
+                dni = calculate_clear_sky_dni(pos["altitude"])
+                for array in SOLAR_ARRAYS:
+                    if array.get("type") == "split":
+                        azimuths = array["azimuth"]
+                        fractions = array.get(
+                            "fractions",
+                            [1.0 / len(azimuths)] * len(azimuths))
+                        irr = sum(
+                            f * calculate_panel_irradiance(
+                                pos["altitude"], pos["azimuth"],
+                                array["tilt"], az, dni)
+                            for az, f in zip(azimuths, fractions)
+                        )
+                    else:
+                        irr = calculate_panel_irradiance(
                             pos["altitude"], pos["azimuth"],
-                            array["tilt"], az, dni)
-                        for az, f in zip(azimuths, fractions)
-                    )
-                else:
-                    irr = calculate_panel_irradiance(
-                        pos["altitude"], pos["azimuth"],
-                        array["tilt"], array["azimuth"], dni)
-                # Match the per-instant model: include temp derate + cloud
-                # factor so the daily-kWh ceiling is comparable to the live
-                # expected_power number.
-                temp_factor  = pv_temperature_derate(irr)
-                cloud_factor = DEFAULT_CLOUD_FACTOR
-                slot_power_w += (array["capacity_kw"] * 1000 * (irr / 1000)
-                                 * SYSTEM_EFFICIENCY * temp_factor * cloud_factor)
-            total_wh += slot_power_w * 0.5  # 30-min slot
+                            array["tilt"], array["azimuth"], dni)
+                    temp_factor = pv_temperature_derate(irr)
+                    cloud_factor = DEFAULT_CLOUD_FACTOR
+                    slot_power_w += (array["capacity_kw"] * 1000 * (irr / 1000)
+                                     * SYSTEM_EFFICIENCY * temp_factor
+                                     * cloud_factor)
+            running_wh += slot_power_w * 0.5   # 30-min slot, Wh
+            cumulative.append(running_wh)
 
     cache["date"] = iso
-    cache["kwh"] = total_wh / 1000
-    return cache["kwh"]
+    cache["cumulative_wh"] = cumulative
+    return cumulative
+
+
+def _expected_daily_kwh_for(date):
+    """Full-day expected kWh — last entry of today's cumulative curve."""
+    cum = _ensure_today_cumulative(date)
+    return (cum[-1] / 1000.0) if cum else 0.0
+
+
+def _expected_kwh_so_far(now: datetime) -> float:
+    """Expected kWh produced from start-of-day up to `now`, interpolated.
+
+    Used by the dashboard to draw the "where you should be" indicator on
+    the PV daily-bar. PV production is non-linear (peaks at solar noon),
+    so this can't be reduced to a fraction-of-day calculation.
+    """
+    cum = _ensure_today_cumulative(now.date())
+    if not cum:
+        return 0.0
+    # Slot index has fractional precision (e.g. 13:15 → 26.5)
+    slot_idx_float = (now.hour + now.minute / 60.0) * 2
+    if slot_idx_float >= len(cum):
+        return cum[-1] / 1000.0
+    if slot_idx_float <= 0:
+        return 0.0
+    low = int(slot_idx_float)
+    high = min(low + 1, len(cum) - 1)
+    frac = slot_idx_float - low
+    interp_wh = cum[low] + frac * (cum[high] - cum[low])
+    return interp_wh / 1000.0
 
 
 # Cache today's events for 60s to avoid hammering the inverter API
