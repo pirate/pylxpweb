@@ -1,0 +1,23 @@
+apply_enable_selfcons.py
+  s_5a300c8feab054::t_b9a2555e64b53e 1-90
+fix_battery_limits.py
+  s_5a300c8feab054::t_058fa50b37bbcc 95-98
+  s_5a300c8feab054::t_18a33bb02566b3 48-53
+  s_5a300c8feab054::t_85285bda31676e 63-64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "2d0d3865cceaf55c210fb57b2b25504f31b3c302",
+  "prompts": {},
+  "sessions": {
+    "s_5a300c8feab054": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb927930-58d5-41d1-8103-42fcc934a2f7",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Nick Sweeting <git@sweeting.me>"
+    }
+  }
+}
