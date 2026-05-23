@@ -45,12 +45,12 @@ EXPECTED = {
     "HOLD_FLOATING_VOLTAGE":                   "54",   # 3.375 V/cell
     "HOLD_LEAD_ACID_CHARGE_VOLT_REF":          "55",   # 3.44 V/cell
 
-    # === Current limits (BMS reports 160 A chg / 180 A dis; inverter set
-    # at 200 A so BMS does all the throttling) ===
-    # User raised from 175/190 → 200/200 on 2026-05-22 to let BMS-limited
-    # full-rate charging happen.
-    "HOLD_LEAD_ACID_CHARGE_RATE":              "200",
-    "HOLD_LEAD_ACID_DISCHARGE_RATE":           "200",
+    # === Current limits ===
+    # User lowered from 200/200 → 160/190 on 2026-05-23 — closer to the
+    # BMS-reported limits (160 chg / 180 dis) so the inverter throttles
+    # instead of relying on the BMS to clamp at the last moment.
+    "HOLD_LEAD_ACID_CHARGE_RATE":              "160",
+    "HOLD_LEAD_ACID_DISCHARGE_RATE":           "190",
 
     # === SOC limits ===
     "HOLD_SYSTEM_CHARGE_SOC_LIMIT":            "95",   # charge ceiling (~95%)
@@ -60,7 +60,8 @@ EXPECTED = {
     # User raised forced-discharge floor 55 → 70% on 2026-05-22, reserves
     # more for overnight ride-through (≥27 kWh combined-pack reserve below 70%).
     "HOLD_FORCED_DISCHG_SOC_LIMIT":            "70",
-    "HOLD_FORCED_CHG_SOC_LIMIT":               "88",
+    # User raised from 88 → 95 on 2026-05-23, matches HOLD_SYSTEM_CHARGE_SOC_LIMIT.
+    "HOLD_FORCED_CHG_SOC_LIMIT":               "95",
 
     # === AC charge guard rails ===
     # The inverter has an auto-AC-charge-from-grid behavior that fires when
@@ -91,10 +92,10 @@ EXPECTED = {
     # battery + PV can both export. Must be FALSE for forced discharge to work.
     "FUNC_PV_SELL_TO_GRID_EN":                 False,  # "Export PV Only" — must stay FALSE
     "FUNC_FEED_IN_GRID_EN":                    True,   # "Sell-back to grid" — must stay TRUE
-    # User lowered export cap 12 → 8 kW on 2026-05-22 (reduces grid-side
-    # heating + voltage rise during peak window; inverter still does 12 kW
-    # max but won't actually push that).
-    "HOLD_FEED_IN_GRID_POWER_PERCENT":         "8",
+    # Export cap in kW (param name says "PERCENT" but the value is kW
+    # for the FlexBOSS21 — verified 2026-05-23). 10 kW means the inverter
+    # won't push more than that to grid, even during forced discharge.
+    "HOLD_FEED_IN_GRID_POWER_PERCENT":         "10",
     # User raised forced-discharge target 6 → 8 kW on 2026-05-22 to match
     # the new export cap.
     "HOLD_FORCED_DISCHG_POWER_CMD":            "8",
