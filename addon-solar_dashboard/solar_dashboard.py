@@ -3683,8 +3683,16 @@ HTML_TEMPLATE = '''
                     // Inverter status goes in the TOU & Mode section next to Mode
                     document.getElementById('inverter-status').textContent = inv.status;
 
-                    // NEW Home card — consumption_power is whole-house load
-                    const homePower = numericPower(inv.consumption_power);
+                    // Home card — total household draw is the sum of the
+                    // inverter's main-AC consumption AND the GridBOSS MID
+                    // UPS-terminal loads (which the inverter's
+                    // consumption_power field does NOT include because
+                    // UPS-backed circuits sit on a separate terminal).
+                    // Without this sum the home reads 0 W whenever the
+                    // grid is disconnected and only UPS loads are active.
+                    const homePower = numericPower(inv.consumption_power)
+                                    + numericPower(inv.eps_power_l1)
+                                    + numericPower(inv.eps_power_l2);
                     updatePowerLoadCard('home', homePower);
 
                     // Upper-right: per-EPS-leg wattage + amperage (from
