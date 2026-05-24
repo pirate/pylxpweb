@@ -1,0 +1,27 @@
+apply_ct_offset.py
+  s_5a300c8feab054::t_d28f6d7bb05a26 1-24,29-74
+  s_5a300c8feab054::t_0ee2c854f9d4d1 25-28
+solar_dashboard.py
+  s_5a300c8feab054::t_7a69a4bac3e619 3588-3599
+  s_5a300c8feab054::t_4360783d60dd5c 922-926
+addon-solar_dashboard/solar_dashboard.py
+  s_5a300c8feab054::t_bc5600b2b5dfc2 922-926,3588-3599
+addon-solar_dashboard/config.yaml
+  s_5a300c8feab054::t_b3bb55735a7408 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "73e5a8d11e56b7700246be18728bb1307a07d214",
+  "prompts": {},
+  "sessions": {
+    "s_5a300c8feab054": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb927930-58d5-41d1-8103-42fcc934a2f7",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Nick Sweeting <git@sweeting.me>"
+    }
+  }
+}
