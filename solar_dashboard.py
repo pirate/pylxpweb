@@ -3557,11 +3557,12 @@ HTML_TEMPLATE = '''
                     el.classList.add(fresh ? 'lux-fresh' : 'lux-stale');
                     el.title = `Live illuminance (${ts ? ts.toLocaleTimeString() : 'unknown'})`;
                 }
-                // Host load (1-min average from /proc/loadavg)
+                // Host CPU (1-min load × 100, "top-style" %) — 100% per core,
+                // so a 4-core machine can sustain up to 400% before saturating.
                 if (data.host && typeof data.host.load_1m === 'number') {
                     const ld = data.host.load_1m;
                     const ldEl = document.getElementById('host-load');
-                    ldEl.textContent = `load ${ld.toFixed(2)}`;
+                    ldEl.textContent = `CPU ${Math.round(ld * 100)}%`;
                     ldEl.classList.remove('load-warm', 'load-hot');
                     if      (ld >= 2) ldEl.classList.add('load-hot');
                     else if (ld >= 1) ldEl.classList.add('load-warm');
