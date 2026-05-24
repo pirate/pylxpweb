@@ -3683,16 +3683,28 @@ HTML_TEMPLATE = '''
                     // Inverter status goes in the TOU & Mode section next to Mode
                     document.getElementById('inverter-status').textContent = inv.status;
 
-                    // Home card — total household draw is the sum of the
-                    // inverter's main-AC consumption AND the GridBOSS MID
-                    // UPS-terminal loads (which the inverter's
-                    // consumption_power field does NOT include because
-                    // UPS-backed circuits sit on a separate terminal).
-                    // Without this sum the home reads 0 W whenever the
-                    // grid is disconnected and only UPS loads are active.
-                    const homePower = numericPower(inv.consumption_power)
-                                    + numericPower(inv.eps_power_l1)
-                                    + numericPower(inv.eps_power_l2);
+                    // Home card — total household draw. Picks the larger
+                    // of two measurements:
+                    //   consumption_power   the inverter's grid-CT-based
+                    //                       total home reading. Reads
+                    //                       correctly when grid is
+                    //                       connected (already includes
+                    //                       EPS-circuit loads) but goes
+                    //                       to 0 when the grid breaker
+                    //                       is open (CT sees no current)
+                    //   eps_l1 + eps_l2     UPS-terminal sub-readings
+                    //                       directly off the MID device.
+                    //                       Always present, but only
+                    //                       covers the always-backed-up
+                    //                       circuit subset.
+                    // max() works correctly in both states without
+                    // double-counting EPS into the grid-CT reading.
+                    const epsSum = numericPower(inv.eps_power_l1)
+                                 + numericPower(inv.eps_power_l2);
+                    const homePower = Math.max(
+                        numericPower(inv.consumption_power),
+                        epsSum,
+                    );
                     updatePowerLoadCard('home', homePower);
 
                     // Upper-right: per-EPS-leg wattage + amperage (from
