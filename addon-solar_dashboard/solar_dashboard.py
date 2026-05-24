@@ -919,6 +919,11 @@ async def fetch_inverter_data():
             "eps_power_l2":   _safe(lambda: mid.ups_l2_power,   0) if mid else 0,
             "eps_amps_l1":    _safe(lambda: mid.ups_l1_current, 0.0) if mid else 0.0,
             "eps_amps_l2":    _safe(lambda: mid.ups_l2_current, 0.0) if mid else 0.0,
+            # MID grid power — unfiltered (no deadband). Convention is
+            # POSITIVE = import, NEGATIVE = export — we flip the sign in
+            # the JS so it matches our existing "+= export, -= import"
+            # display convention on the Grid card.
+            "mid_grid_power":  _safe(lambda: mid.grid_power, None) if mid else None,
             # Today's energy totals (kWh) — populated when EnergyInfo is available
             "energy_today_yield":    _safe(lambda: inverter.total_energy_today, 0.0),
             "energy_today_charge":   _safe(lambda: inverter.energy_today_charging, 0.0),
@@ -3580,7 +3585,18 @@ HTML_TEMPLATE = '''
                     const expectedPower = numericPower(data.expected_power);
                     const battPower = numericPower(inv.battery_charge_power) - numericPower(inv.battery_discharge_power);
                     // Net grid: + = exporting to grid, - = importing from grid
-                    const gridPower = numericPower(inv.power_to_grid) - numericPower(inv.power_to_user);
+                    // Prefer the GridBOSS MID's unfiltered grid_power reading
+                    // (no deadband) over the inverter's power_to_grid /
+                    // power_to_user which floor anything under ~10W to 0.
+                    // MID convention is +import / −export; flip the sign so
+                    // gridPower stays + export / − import per our existing
+                    // Grid card logic.
+                    let gridPower;
+                    if (inv.mid_grid_power != null) {
+                        gridPower = -numericPower(inv.mid_grid_power);
+                    } else {
+                        gridPower = numericPower(inv.power_to_grid) - numericPower(inv.power_to_user);
+                    }
                     // PV bar is "% of expected at this instant" — uses the
                     // model-derived expected_power as its denominator.
                     updatePowerLoadCard('pv', pvPower, expectedPower);
