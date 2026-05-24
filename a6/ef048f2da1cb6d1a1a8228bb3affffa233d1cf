@@ -1,0 +1,23 @@
+addon-solar_dashboard/solar_dashboard.py
+  s_5a300c8feab054::t_301f8cbee0bf54 3560-3561,3565
+addon-solar_dashboard/config.yaml
+  s_5a300c8feab054::t_9af6138b4ec60e 2
+solar_dashboard.py
+  s_5a300c8feab054::t_9a1a666a581298 3560-3561,3565
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.0",
+  "base_commit_sha": "a6ef048f2da1cb6d1a1a8228bb3affffa233d1cf",
+  "prompts": {},
+  "sessions": {
+    "s_5a300c8feab054": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eb927930-58d5-41d1-8103-42fcc934a2f7",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Nick Sweeting <git@sweeting.me>"
+    }
+  }
+}
