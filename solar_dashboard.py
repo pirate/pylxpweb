@@ -1099,6 +1099,8 @@ HTML_TEMPLATE = '''
         /* Color-code load: <1 ok, 1-2 warm, >2 hot */
         .top-bar-host .host-load.load-warm { color: #e67e22; }
         .top-bar-host .host-load.load-hot  { color: #e74c3c; }
+        /* "Missing watts" — sources minus sinks minus home. Muted red. */
+        .top-bar-host .energy-loss { color: #c75555; opacity: 0.85; }
         /* Main container fills viewport minus the top bar */
         #container { display: flex; height: calc(100vh - 38px); }
         #canvas-container { flex: 1; position: relative; }
@@ -1900,6 +1902,7 @@ HTML_TEMPLATE = '''
         </div>
         <div id="top-bar-clock" class="top-bar-clock">--:--:--</div>
         <div id="top-bar-host" class="top-bar-host">
+            <span class="energy-loss" id="energy-loss" title="Unaccounted power: sources − sinks − home (inverter + wiring losses)">LOSS --</span>
             <span class="host-load" id="host-load">load --</span>
         </div>
     </div>
@@ -3685,6 +3688,9 @@ HTML_TEMPLATE = '''
 
                     // Home card — total household draw. Picks the larger
                     // of two measurements:
+                    // (Loss display in the top bar computed below using the
+                    // same homePower value so the energy balance is internally
+                    // consistent.)
                     //   consumption_power   the inverter's grid-CT-based
                     //                       total home reading. Reads
                     //                       correctly when grid is
@@ -3706,6 +3712,25 @@ HTML_TEMPLATE = '''
                         epsSum,
                     );
                     updatePowerLoadCard('home', homePower);
+
+                    // Top-bar "LOSS" — unaccounted power when you tally all
+                    // measured I/O. Positive value = inverter conversion +
+                    // wiring losses + inverter idle self-consumption. A few
+                    // hundred watts is normal; swings into the kW range
+                    // indicate a measurement mismatch somewhere.
+                    const _sources = pvPower
+                        + numericPower(inv.battery_discharge_power)
+                        + numericPower(inv.power_to_user);
+                    const _sinks = numericPower(inv.battery_charge_power)
+                        + numericPower(inv.power_to_grid)
+                        + homePower;
+                    const _loss = _sources - _sinks;
+                    const _lossEl = document.getElementById('energy-loss');
+                    if (_lossEl) {
+                        const _sign = _loss < 0 ? '-' : '';
+                        _lossEl.textContent =
+                            `LOSS ${_sign}${Math.abs(_loss).toFixed(0)} W`;
+                    }
 
                     // Upper-right: per-EPS-leg wattage + amperage (from
                     // GridBOSS MID UPS terminals). Voltage + frequency
